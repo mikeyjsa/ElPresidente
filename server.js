@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Server } from 'socket.io'
 
 const PORT = Number(process.env.PORT || 3001)
+const DIST_DIR = path.join(process.cwd(), 'dist')
 const TURN_SECONDS = 30
 const MIN_PLAYERS = 3
 const MIN_HUMANS_WITH_COMPUTER = 2
@@ -16,6 +17,18 @@ const RECENT_WINNER_LIMIT = 12
 const PLAYER_ICONS = ['crown', 'sparkles', 'flame', 'heart', 'shield', 'club', 'star', 'sun']
 const PLAYER_COLORS = ['gold', 'green', 'red', 'blue', 'purple', 'teal', 'rose', 'slate']
 let computerTurnTimer = null
+
+const mimeTypes = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+}
 
 const suits = [
   { id: 'oros', name: 'Coins', symbol: 'coin', color: 'gold' },
@@ -86,6 +99,35 @@ function lanAddress() {
   return 'localhost'
 }
 
+function publicBaseUrl() {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '')
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '')
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+  return `http://${lanAddress()}:5173`
+}
+
+function serveStatic(req, res) {
+  if (req.url?.startsWith('/socket.io/')) return
+  if (!fs.existsSync(DIST_DIR)) {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('El Presidente realtime server is running. Build the client with npm run build for production hosting.')
+    return
+  }
+
+  const url = new URL(req.url || '/', 'http://localhost')
+  const pathname = decodeURIComponent(url.pathname)
+  const normalizedPath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '')
+  const requestedPath = path.join(DIST_DIR, normalizedPath === '/' ? 'index.html' : normalizedPath)
+  const indexPath = path.join(DIST_DIR, 'index.html')
+  const filePath = requestedPath.startsWith(DIST_DIR) && fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()
+    ? requestedPath
+    : indexPath
+  const ext = path.extname(filePath)
+
+  res.writeHead(200, { 'content-type': mimeTypes[ext] || 'application/octet-stream' })
+  fs.createReadStream(filePath).pipe(res)
+}
+
 function createDeck() {
   return suits.flatMap((suit) =>
     ranks.map((rank) => ({
@@ -145,7 +187,7 @@ function tableState() {
     round: state.round,
     recentWinners: state.recentWinners,
     log: state.log.slice(-8).reverse(),
-    joinUrl: `http://${lanAddress()}:5173/join`,
+    joinUrl: `${publicBaseUrl()}/join`,
   }
 }
 
@@ -350,7 +392,7 @@ function takeComputerTurn(playerId) {
   emitAll()
 }
 
-const httpServer = createServer()
+const httpServer = createServer(serveStatic)
 const io = new Server(httpServer, {
   cors: { origin: '*' },
 })

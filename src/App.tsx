@@ -28,7 +28,7 @@ import {
 import './App.css'
 import type { Card, GameState, Player, PlayerColor, PlayerIcon, PlayerRole, RecentWinner } from './gameTypes'
 
-const socketUrl = `${window.location.protocol}//${window.location.hostname}:3001`
+const socketUrl = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin
 const socket: Socket = io(socketUrl)
 const minimumPlayers = 3
 const minimumHumansWithComputer = 2
