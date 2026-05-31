@@ -14,7 +14,7 @@ const COMPUTER_PLAYER_NAME = 'Computer Player'
 const COMPUTER_TURN_DELAY = 1200
 const SCORE_FILE = path.join(process.cwd(), 'data', 'scores.json')
 const RECENT_WINNER_LIMIT = 12
-const PLAYER_ICONS = ['crown', 'sparkles', 'flame', 'heart', 'shield', 'club', 'star', 'sun']
+const PLAYER_ICONS = ['crown', 'sparkles', 'flame', 'heart', 'shield', 'club', 'star', 'sun', 'bolt', 'diamond', 'moon', 'gem']
 const PLAYER_COLORS = ['gold', 'green', 'red', 'blue', 'purple', 'teal', 'rose', 'slate']
 let computerTurnTimer = null
 
@@ -171,6 +171,16 @@ function publicPlayer(player) {
   }
 }
 
+function scoreSummary() {
+  const [topName, topWins = 0] =
+    Object.entries(state.winners).sort(([, winsA], [, winsB]) => Number(winsB) - Number(winsA))[0] || []
+  const lastPresident = state.recentWinners[0] || null
+  return {
+    lastPresident,
+    topWinner: topName ? { name: topName, wins: topWins } : null,
+  }
+}
+
 function tableState() {
   const currentPlayer = state.players.find((p) => p.id === state.currentTurnId)
   return {
@@ -186,6 +196,7 @@ function tableState() {
     finishOrder: state.finishOrder,
     round: state.round,
     recentWinners: state.recentWinners,
+    scoreSummary: scoreSummary(),
     log: state.log.slice(-8).reverse(),
     joinUrl: `${publicBaseUrl()}/join`,
   }
@@ -453,18 +464,19 @@ io.on('connection', (socket) => {
   })
 
   socket.on('resetLobby', () => {
+    if (computerTurnTimer) {
+      clearTimeout(computerTurnTimer)
+      computerTurnTimer = null
+    }
     state.phase = 'lobby'
-    removeComputerPlayer()
-    state.players.forEach((player) => {
-      player.hand = []
-      player.finishedAt = null
-    })
+    state.players = []
     state.pile = []
     state.currentTurnId = null
     state.turnStartedAt = null
     state.passCount = 0
     state.finishOrder = []
-    state.log.push('Table reset to the lobby.')
+    state.log = ['Table reset. Scan the QR code to join again.']
+    io.emit('lobbyReset')
     emitAll()
   })
 

@@ -1,6 +1,19 @@
 export type SuitSymbol = 'coin' | 'cup' | 'sword' | 'club'
 export type SuitColor = 'gold' | 'red' | 'steel' | 'green'
-export type PlayerIcon = 'crown' | 'sparkles' | 'flame' | 'heart' | 'shield' | 'club' | 'star' | 'sun' | 'bot'
+export type PlayerIcon =
+  | 'crown'
+  | 'sparkles'
+  | 'flame'
+  | 'heart'
+  | 'shield'
+  | 'club'
+  | 'star'
+  | 'sun'
+  | 'bolt'
+  | 'diamond'
+  | 'moon'
+  | 'gem'
+  | 'bot'
 export type PlayerColor = 'gold' | 'green' | 'red' | 'blue' | 'purple' | 'teal' | 'rose' | 'slate'
 export type PlayerRole = 'president' | 'fool' | 'neutral'
 
@@ -35,6 +48,14 @@ export type RecentWinner = {
   isComputer?: boolean
 }
 
+export type ScoreSummary = {
+  lastPresident: RecentWinner | null
+  topWinner: {
+    name: string
+    wins: number
+  } | null
+}
+
 export type GameState = {
   phase: 'lobby' | 'playing' | 'finished'
   players: Player[]
@@ -48,6 +69,7 @@ export type GameState = {
   finishOrder: string[]
   round: number
   recentWinners: RecentWinner[]
+  scoreSummary: ScoreSummary
   log: string[]
   joinUrl: string
   selfId?: string | null

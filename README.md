@@ -101,6 +101,9 @@ https://elpresidente-production.up.railway.app/
 
 ## Project Update Log
 
+- 2026-06-01 00:37 SAST: Made Reset clear the current table seats, old join names, hands, pile, turn state, and joined phone forms.
+- 2026-06-01 00:21 SAST: Added a larger, animated player icon picker with livelier avatar effects.
+- 2026-05-30 18:14 SAST: Added turn announcement overlay, mobile layout refinements, and scoreboard summary for last President and most wins.
 - 2026-05-30 11:02 SAST: Fixed Railway production connectivity by using same-origin Socket.IO in production and serving the built client from `server.js`.
 - 2026-05-30 10:55 SAST: Replaced the Vite template README with project-specific documentation and this update log.
 - 2026-05-30: Removed the host "Your Hand" tray so hands only appear on player phones.

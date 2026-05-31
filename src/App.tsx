@@ -26,21 +26,25 @@ import {
   WifiOff,
 } from 'lucide-react'
 import './App.css'
-import type { Card, GameState, Player, PlayerColor, PlayerIcon, PlayerRole, RecentWinner } from './gameTypes'
+import type { Card, GameState, Player, PlayerColor, PlayerIcon, PlayerRole, RecentWinner, ScoreSummary } from './gameTypes'
 
 const socketUrl = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin
 const socket: Socket = io(socketUrl)
 const minimumPlayers = 3
 const minimumHumansWithComputer = 2
 const playerIcons: Array<{ id: PlayerIcon; label: string }> = [
-  { id: 'crown', label: 'Crown' },
-  { id: 'sparkles', label: 'Spark' },
-  { id: 'flame', label: 'Flame' },
+  { id: 'crown', label: 'Royal' },
+  { id: 'sparkles', label: 'Magic' },
+  { id: 'flame', label: 'Fire' },
   { id: 'heart', label: 'Heart' },
-  { id: 'shield', label: 'Shield' },
+  { id: 'shield', label: 'Guard' },
   { id: 'club', label: 'Club' },
   { id: 'star', label: 'Star' },
   { id: 'sun', label: 'Sun' },
+  { id: 'bolt', label: 'Bolt' },
+  { id: 'diamond', label: 'Diamond' },
+  { id: 'moon', label: 'Moon' },
+  { id: 'gem', label: 'Gem' },
 ]
 const playerColors: Array<{ id: PlayerColor; label: string }> = [
   { id: 'gold', label: 'Gold' },
@@ -66,6 +70,10 @@ const emptyState: GameState = {
   finishOrder: [],
   round: 0,
   recentWinners: [],
+  scoreSummary: {
+    lastPresident: null,
+    topWinner: null,
+  },
   log: [],
   joinUrl: `${window.location.origin}/join`,
 }
@@ -174,6 +182,10 @@ function HostScreen() {
       </section>
 
       <section className={`table-stage ${state.phase === 'playing' ? 'is-playing' : 'is-lobby'}`}>
+        <TurnAnnouncement
+          key={state.currentTurnId || 'no-turn'}
+          message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
+        />
         <div className="top-controls">
           <div className="table-stat">
             <UsersRound size={16} />
@@ -232,7 +244,12 @@ function HostScreen() {
       </section>
 
       <aside className="score-rail">
-        <Scoreboard players={state.players} finishOrder={state.finishOrder} recentWinners={state.recentWinners} />
+        <Scoreboard
+          players={state.players}
+          finishOrder={state.finishOrder}
+          recentWinners={state.recentWinners}
+          scoreSummary={state.scoreSummary}
+        />
         <div className="event-log">
           <h2>Table Log</h2>
           {state.log.map((line, index) => (
@@ -278,6 +295,20 @@ function PlayerScreen() {
       }
     })
   }
+
+  useEffect(() => {
+    const onLobbyReset = () => {
+      setJoined(false)
+      setName('')
+      setSelected([])
+      setError('')
+    }
+
+    socket.on('lobbyReset', onLobbyReset)
+    return () => {
+      socket.off('lobbyReset', onLobbyReset)
+    }
+  }, [])
 
   const toggleCard = (card: Card) => {
     if (!isTurn || !legalCardIds.has(card.id)) return
@@ -337,6 +368,10 @@ function PlayerScreen() {
 
   return (
     <main className={`phone-shell ${isTurn ? 'is-turn' : 'is-waiting'}`}>
+      <TurnAnnouncement
+        key={state.currentTurnId || 'no-turn'}
+        message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
+      />
       <header className="phone-header">
         <div>
           <span>{state.selfName}</span>
@@ -404,10 +439,12 @@ function Scoreboard({
   players,
   finishOrder,
   recentWinners = [],
+  scoreSummary,
 }: {
   players: Player[]
   finishOrder: string[]
   recentWinners: RecentWinner[]
+  scoreSummary: ScoreSummary
 }) {
   return (
     <div className="scoreboard">
@@ -415,6 +452,18 @@ function Scoreboard({
         <Trophy size={20} />
         Score
       </h2>
+      <div className="score-summary">
+        <div>
+          <span>Last President</span>
+          <strong>{scoreSummary.lastPresident?.name || 'None yet'}</strong>
+        </div>
+        <div>
+          <span>Most wins</span>
+          <strong>
+            {scoreSummary.topWinner ? `${scoreSummary.topWinner.name} (${scoreSummary.topWinner.wins})` : 'None yet'}
+          </strong>
+        </div>
+      </div>
       {players.map((player) => (
         <div className="score-row" key={player.id}>
           <span className="score-name">
@@ -441,6 +490,16 @@ function Scoreboard({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function TurnAnnouncement({ message }: { message: string }) {
+  if (!message) return null
+  return (
+    <div className="turn-announcement" aria-live="polite">
+      <Crown size={28} />
+      <span>{message}</span>
     </div>
   )
 }
@@ -487,7 +546,7 @@ function IdentityPicker({
   return (
     <div className="identity-picker">
       <div className="identity-preview">
-        <div className={`seat-avatar color-${color}`}>
+        <div className={`seat-avatar color-${color} icon-${icon}`}>
           <PlayerGlyph icon={icon} />
         </div>
         <span>Choose your table look</span>
@@ -497,12 +556,13 @@ function IdentityPicker({
           <button
             key={item.id}
             type="button"
-            className={`icon-choice ${icon === item.id ? 'selected' : ''}`}
+            className={`icon-choice icon-${item.id} ${icon === item.id ? 'selected' : ''}`}
             aria-label={item.label}
             aria-pressed={icon === item.id}
             onClick={() => onIconChange(item.id)}
           >
             <PlayerGlyph icon={item.id} />
+            <span>{item.label}</span>
           </button>
         ))}
       </div>
@@ -523,9 +583,10 @@ function IdentityPicker({
 }
 
 function PlayerAvatar({ player, compact = false }: { player: Player; compact?: boolean }) {
+  const icon = player.isComputer ? 'bot' : player.icon || 'star'
   return (
-    <div className={`seat-avatar color-${player.color || 'gold'} ${compact ? 'compact' : ''}`}>
-      <PlayerGlyph icon={player.isComputer ? 'bot' : player.icon || 'star'} />
+    <div className={`seat-avatar color-${player.color || 'gold'} icon-${icon} ${compact ? 'compact' : ''}`}>
+      <PlayerGlyph icon={icon} />
     </div>
   )
 }
@@ -541,6 +602,36 @@ function PlayerGlyph({ icon }: { icon: PlayerIcon }) {
   if (icon === 'club') return <Club size={size} />
   if (icon === 'sun') return <Sun size={size} />
   if (icon === 'star') return <Star size={size} />
+  if (icon === 'bolt') {
+    return (
+      <svg className="custom-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M13 2 4 14h7l-1 8 10-13h-7l0-7Z" />
+      </svg>
+    )
+  }
+  if (icon === 'diamond') {
+    return (
+      <svg className="custom-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3 21 9 12 21 3 9 12 3Z" />
+        <path d="M7 9h10M9 9l3 12 3-12" />
+      </svg>
+    )
+  }
+  if (icon === 'moon') {
+    return (
+      <svg className="custom-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M17.5 18.5A8 8 0 0 1 12.2 3 7 7 0 1 0 21 11.8a8 8 0 0 1-3.5 6.7Z" />
+      </svg>
+    )
+  }
+  if (icon === 'gem') {
+    return (
+      <svg className="custom-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 4h12l4 6-10 11L2 10l4-6Z" />
+        <path d="M2 10h20M8 4l4 17 4-17" />
+      </svg>
+    )
+  }
   return <UserRound size={size} />
 }
 
