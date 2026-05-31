@@ -101,6 +101,7 @@ https://elpresidente-production.up.railway.app/
 
 ## Project Update Log
 
+- 2026-06-01 00:46 SAST: Verified all 12 player icon choices render, select correctly, update the preview avatar, and fit on a phone viewport.
 - 2026-06-01 00:37 SAST: Made Reset clear the current table seats, old join names, hands, pile, turn state, and joined phone forms.
 - 2026-06-01 00:21 SAST: Added a larger, animated player icon picker with livelier avatar effects.
 - 2026-05-30 18:14 SAST: Added turn announcement overlay, mobile layout refinements, and scoreboard summary for last President and most wins.
