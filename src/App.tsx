@@ -277,12 +277,14 @@ function PlayerScreen() {
 
   const legalCardIds = useMemo(() => {
     if (!state.pile.length) return new Set(hand.map((card) => card.id))
-    return new Set(
-      hand
-        .filter((card) => Math.abs(card.strength - state.pile[0].strength) === 1)
-        .map((card) => card.id),
-    )
+    return new Set(hand.filter((card) => card.strength > state.pile[0].strength).map((card) => card.id))
   }, [hand, state.pile])
+  const selectedCards = useMemo(() => selected.map((id) => hand.find((card) => card.id === id)).filter((card): card is Card => Boolean(card)), [hand, selected])
+  const selectableCardIds = useMemo(() => {
+    if (!selectedCards.length) return legalCardIds
+    const selectedRank = selectedCards[0].rank
+    return new Set(hand.filter((card) => legalCardIds.has(card.id) && card.rank === selectedRank).map((card) => card.id))
+  }, [hand, legalCardIds, selectedCards])
 
   const join = (event: React.FormEvent) => {
     event.preventDefault()
@@ -311,8 +313,8 @@ function PlayerScreen() {
   }, [])
 
   const toggleCard = (card: Card) => {
-    if (!isTurn || !legalCardIds.has(card.id)) return
-    setSelected((current) => (current.includes(card.id) ? [] : [card.id]))
+    if (!isTurn || !selectableCardIds.has(card.id)) return
+    setSelected((current) => (current.includes(card.id) ? current.filter((id) => id !== card.id) : [...current, card.id]))
   }
 
   const playSelected = () => {
@@ -395,7 +397,7 @@ function PlayerScreen() {
             key={card.id}
             type="button"
             className={`hand-card ${selected.includes(card.id) ? 'selected' : ''}`}
-            disabled={!isTurn || !legalCardIds.has(card.id)}
+            disabled={!isTurn || !selectableCardIds.has(card.id)}
             onClick={() => toggleCard(card)}
           >
             <SpanishCard card={card} compact index={index} />
@@ -406,11 +408,11 @@ function PlayerScreen() {
       <footer className="phone-actions">
         <div className="selection-meter">
           <Sparkles size={16} />
-          <span>{selected.length ? `${selected.length} selected` : isTurn ? 'Choose a card' : 'Waiting'}</span>
+          <span>{selected.length ? `${selected.length} selected` : isTurn ? 'Choose cards' : 'Waiting'}</span>
         </div>
         <button type="button" onClick={playSelected} disabled={!isTurn || !selected.length}>
           <Play size={18} />
-          Play card
+          Play cards
         </button>
         <button type="button" className="secondary" onClick={passTurn} disabled={!isTurn}>
           Pass
@@ -664,7 +666,9 @@ function RulesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         <ol>
           <li>Each round deals the Spanish deck evenly across all seated players.</li>
           <li>The first player leads with any card when the pile is empty.</li>
-          <li>After a lead, play exactly one card that is one rank higher or one rank lower than the current pile card.</li>
+          <li>Cards rank from 3 up to 12, then 1, then 2. The 2 of Coins is the absolute highest card.</li>
+          <li>After a lead, play one or more cards of the same rank that are higher than the current pile rank.</li>
+          <li>Playing the 2 of Coins closes the pile immediately, and that player leads the next pile.</li>
           <li>You cannot pass on an empty pile. Once a card is on the pile, you may pass if you have no useful play or want to hold your cards.</li>
           <li>When every other active player passes, the pile clears and the next player leads any card.</li>
           <li>The first player to run out of cards wins the round and becomes President.</li>

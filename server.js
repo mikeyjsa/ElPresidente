@@ -43,11 +43,13 @@ const ranks = [
   { value: 5, label: '5', strength: 3 },
   { value: 6, label: '6', strength: 4 },
   { value: 7, label: '7', strength: 5 },
-  { value: 10, label: 'Sota', strength: 6 },
-  { value: 11, label: 'Caballo', strength: 7 },
-  { value: 12, label: 'Rey', strength: 8 },
-  { value: 1, label: 'As', strength: 9 },
-  { value: 2, label: '2', strength: 10 },
+  { value: 8, label: '8', strength: 6 },
+  { value: 9, label: '9', strength: 7 },
+  { value: 10, label: '10', strength: 8 },
+  { value: 11, label: '11', strength: 9 },
+  { value: 12, label: '12', strength: 10 },
+  { value: 1, label: '1', strength: 11 },
+  { value: 2, label: '2', strength: 12 },
 ]
 
 function loadScores() {
@@ -283,20 +285,28 @@ function clearPile(reason) {
 function legalCardsFor(player) {
   if (!state.pile.length) return sortHand(player.hand)
   const topStrength = state.pile[0].strength
-  return sortHand(player.hand).filter((card) => Math.abs(card.strength - topStrength) === 1)
+  return sortHand(player.hand).filter((card) => card.strength > topStrength)
 }
 
-function playCard(player, card) {
-  player.hand = player.hand.filter((item) => item.id !== card.id)
-  state.pile = [card]
+function isPileCloser(card) {
+  return card.rank === 2 && card.suit === 'oros'
+}
+
+function playCards(player, cards) {
+  const cardIds = new Set(cards.map((card) => card.id))
+  const closesPile = cards.some(isPileCloser)
+  player.hand = player.hand.filter((item) => !cardIds.has(item.id))
+  state.pile = cards
   state.passCount = 0
-  state.log.push(`${player.name} played ${card.rankLabel} of ${card.suitName}.`)
+  state.log.push(`${player.name} played ${cards.map((card) => `${card.rankLabel} of ${card.suitName}`).join(', ')}.`)
+  if (closesPile) clearPile(`${player.name} closed the pile with the 2 of Coins and leads again.`)
   if (!player.hand.length) {
     player.finishedAt = state.finishOrder.length + 1
     state.finishOrder.push(player.name)
     state.log.push(`${player.name} went out in position ${player.finishedAt}.`)
     clearPile('Pile cleared after a player went out.')
   }
+  return { closesPile }
 }
 
 function passPlayer(player, reason = 'passed') {
@@ -395,7 +405,13 @@ function takeComputerTurn(playerId) {
 
   const [card] = legalCardsFor(player)
   if (card) {
-    playCard(player, card)
+    const { closesPile } = playCards(player, [card])
+    if (closesPile && !player.finishedAt) {
+      state.currentTurnId = player.id
+      state.turnStartedAt = Date.now()
+      emitAll()
+      return
+    }
   } else {
     passPlayer(player)
   }
@@ -487,23 +503,32 @@ io.on('connection', (socket) => {
       return
     }
     const ids = Array.isArray(cardIds) ? cardIds : []
+    const uniqueIds = new Set(ids)
+    if (uniqueIds.size !== ids.length) {
+      reply?.({ ok: false, error: 'Choose each card only once.' })
+      return
+    }
     const selected = ids.map((id) => player.hand.find((card) => card.id === id)).filter(Boolean)
     if (!selected.length || selected.length !== ids.length) {
       reply?.({ ok: false, error: 'Choose cards from your hand.' })
       return
     }
-    const card = selected[0]
-    if (selected.length !== 1) {
-      reply?.({ ok: false, error: 'Play one card at a time.' })
+    if (selected.some((card) => card.rank !== selected[0].rank)) {
+      reply?.({ ok: false, error: 'Play cards of the same rank together.' })
       return
     }
-    if (!legalCardsFor(player).some((legalCard) => legalCard.id === card.id)) {
-      reply?.({ ok: false, error: 'Play a card one rank higher or lower than the pile.' })
+    if (state.pile.length && selected[0].strength <= state.pile[0].strength) {
+      reply?.({ ok: false, error: 'Play cards higher than the pile.' })
       return
     }
-    playCard(player, card)
+    const { closesPile } = playCards(player, selected)
     reply?.({ ok: true })
-    nextTurn(player.id)
+    if (closesPile && !player.finishedAt) {
+      state.currentTurnId = player.id
+      state.turnStartedAt = Date.now()
+    } else {
+      nextTurn(player.id)
+    }
     emitAll()
   })
 
