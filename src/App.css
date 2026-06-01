@@ -338,6 +338,8 @@ p {
   gap: 8px;
   max-height: 190px;
   overflow: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
 }
 
 .chat-feed p {
@@ -656,13 +658,13 @@ p {
   position: absolute;
   z-index: 3;
   translate: -50% -50%;
-  min-width: 132px;
-  padding: 9px 12px 9px 42px;
+  min-width: 150px;
+  padding: 9px 14px 9px 42px;
   border: 1px solid rgba(255, 240, 196, 0.24);
   border-radius: 8px;
   background: rgba(15, 10, 6, 0.78);
   color: #f7eacf;
-  text-align: left;
+  text-align: center;
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
   transition:
     transform 180ms ease,
@@ -803,7 +805,7 @@ p {
   min-width: 0;
   min-height: 18px;
   width: fit-content;
-  margin-top: 3px;
+  margin: 3px auto 0;
   padding: 0 6px;
   font-size: 10px;
 }
@@ -1689,7 +1691,7 @@ p {
   }
 
   .player-seat {
-    min-width: 112px;
+    min-width: 126px;
     padding: 8px 10px 8px 36px;
   }
 

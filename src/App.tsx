@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { io, Socket } from 'socket.io-client'
 import {
@@ -308,7 +308,7 @@ function PlayerScreen() {
 
   const legalCardIds = useMemo(() => {
     if (!state.pile.length) return new Set(hand.map((card) => card.id))
-    return new Set(hand.filter((card) => card.strength > state.pile[0].strength).map((card) => card.id))
+    return new Set(hand.filter((card) => card.strength >= state.pile[0].strength).map((card) => card.id))
   }, [hand, state.pile])
   const selectedCards = useMemo(() => selected.map((id) => hand.find((card) => card.id === id)).filter((card): card is Card => Boolean(card)), [hand, selected])
   const selectedClosesPile = selectedCards.some(isPileCloser)
@@ -504,6 +504,13 @@ function PlayerScreen() {
 function ChatPanel({ messages, canSend }: { messages: ChatMessage[]; canSend: boolean }) {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const feedRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const feed = feedRef.current
+    if (!feed) return
+    feed.scrollTop = feed.scrollHeight
+  }, [messages])
 
   const sendMessage = (event: React.FormEvent) => {
     event.preventDefault()
@@ -525,7 +532,7 @@ function ChatPanel({ messages, canSend }: { messages: ChatMessage[]; canSend: bo
         <MessageCircle size={18} />
         Room Chat
       </h2>
-      <div className="chat-feed">
+      <div className="chat-feed" ref={feedRef} aria-live="polite">
         {messages.length ? (
           messages.map((item) => (
             <p key={item.id}>
@@ -794,7 +801,8 @@ function RulesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <li>Each round deals the Spanish deck evenly across all seated players.</li>
           <li>The first player leads with any card when the pile is empty.</li>
           <li>Cards rank from 3 up to 12, then 1, then 2. The 2 of Coins is the absolute highest card.</li>
-          <li>After a lead, play one or more cards of the same rank that are higher than the current pile rank.</li>
+          <li>After a lead, play one or more cards of the same rank that match or beat the current pile rank.</li>
+          <li>Playing the same rank as the current pile skips the next active player.</li>
           <li>If the pile has two or more cards, every play must match that number of cards until the pile closes.</li>
           <li>Playing the 2 of Coins closes the pile immediately, and that player leads the next pile.</li>
           <li>You cannot pass on an empty pile. Once a card is on the pile, you may pass if you have no useful play or want to hold your cards.</li>

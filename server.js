@@ -316,16 +316,22 @@ function ensureComputerPlayer() {
   state.log.push(`${COMPUTER_PLAYER_NAME} joined as the third seat.`)
 }
 
-function nextTurn(afterId = state.currentTurnId) {
+function nextTurn(afterId = state.currentTurnId, skipNext = false) {
   const active = activePlayers()
   if (active.length <= 1) {
     endRound()
     return
   }
   const fullIndex = state.players.findIndex((player) => player.id === afterId)
+  let skippedPlayer = null
   for (let offset = 1; offset <= state.players.length; offset += 1) {
     const next = state.players[(fullIndex + offset + state.players.length) % state.players.length]
     if (next && !next.finishedAt && !next.isSpectator) {
+      if (skipNext && !skippedPlayer) {
+        skippedPlayer = next
+        state.log.push(`${next.name} was skipped by a matching rank.`)
+        continue
+      }
       state.currentTurnId = next.id
       state.turnStartedAt = Date.now()
       return
@@ -343,7 +349,7 @@ function clearPile(reason) {
 function legalCardsFor(player) {
   if (!state.pile.length) return sortHand(player.hand)
   const topStrength = state.pile[0].strength
-  return sortHand(player.hand).filter((card) => card.strength > topStrength)
+  return sortHand(player.hand).filter((card) => card.strength >= topStrength)
 }
 
 function legalCardGroupsFor(player) {
@@ -363,8 +369,10 @@ function isPileCloser(card) {
 }
 
 function playCards(player, cards) {
+  const previousPile = state.pile
   const cardIds = new Set(cards.map((card) => card.id))
   const closesPile = cards.some(isPileCloser)
+  const skipNext = Boolean(previousPile.length && !closesPile && cards[0].rank === previousPile[0].rank)
   player.hand = player.hand.filter((item) => !cardIds.has(item.id))
   state.pile = cards
   state.pileOwnerId = player.id
@@ -377,7 +385,7 @@ function playCards(player, cards) {
     state.log.push(`${player.name} went out in position ${player.finishedAt}.`)
     clearPile('Pile cleared after a player went out.')
   }
-  return { closesPile }
+  return { closesPile, skipNext }
 }
 
 function passPlayer(player, reason = 'passed') {
@@ -493,8 +501,10 @@ function takeComputerTurn(playerId) {
   }
 
   const [cards] = legalCardGroupsFor(player)
+  let skipNextPlay = false
   if (cards) {
-    const { closesPile } = playCards(player, cards)
+    const { closesPile, skipNext } = playCards(player, cards)
+    skipNextPlay = skipNext
     if (closesPile && !player.finishedAt) {
       state.currentTurnId = player.id
       state.turnStartedAt = Date.now()
@@ -508,7 +518,7 @@ function takeComputerTurn(playerId) {
       return
     }
   }
-  nextTurn(player.id)
+  nextTurn(player.id, skipNextPlay)
   emitAll()
 }
 
@@ -640,8 +650,8 @@ io.on('connection', (socket) => {
       reply?.({ ok: false, error: `Play ${state.pile.length} card${state.pile.length === 1 ? '' : 's'} to match the pile.` })
       return
     }
-    if (state.pile.length && !closesPile && selected[0].strength <= state.pile[0].strength) {
-      reply?.({ ok: false, error: 'Play cards higher than the pile.' })
+    if (state.pile.length && !closesPile && selected[0].strength < state.pile[0].strength) {
+      reply?.({ ok: false, error: 'Play cards that match or beat the pile.' })
       return
     }
     const result = playCards(player, selected)
@@ -650,7 +660,7 @@ io.on('connection', (socket) => {
       state.currentTurnId = player.id
       state.turnStartedAt = Date.now()
     } else {
-      nextTurn(player.id)
+      nextTurn(player.id, result.skipNext)
     }
     emitAll()
   })
