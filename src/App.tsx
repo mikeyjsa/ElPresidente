@@ -511,7 +511,16 @@ function SkipNotice({
   notice: GameState['skipNotice']
   selfId?: string | null
 }) {
-  if (!notice) return null
+  const [hiddenNoticeKey, setHiddenNoticeKey] = useState('')
+  const noticeKey = notice ? `${notice.playerId}-${notice.skippedAt}` : ''
+
+  useEffect(() => {
+    if (!noticeKey) return
+    const timeout = window.setTimeout(() => setHiddenNoticeKey(noticeKey), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [noticeKey])
+
+  if (!notice || hiddenNoticeKey === noticeKey) return null
   const isSelf = notice.playerId === selfId
   return (
     <div className={`skip-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
