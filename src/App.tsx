@@ -7,10 +7,12 @@ import {
   Circle,
   Club,
   Crown,
+  Eye,
   Flame,
   Heart,
   Hourglass,
   Layers3,
+  MessageCircle,
   Play,
   RefreshCw,
   Send,
@@ -26,7 +28,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import './App.css'
-import type { Card, GameState, Player, PlayerColor, PlayerIcon, PlayerRole, RecentWinner, ScoreSummary } from './gameTypes'
+import type { Card, ChatMessage, GameState, Player, PlayerColor, PlayerIcon, PlayerRole, RecentWinner, ScoreSummary } from './gameTypes'
 
 const socketUrl = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin
 const socket: Socket = io(socketUrl)
@@ -58,6 +60,7 @@ const playerColors: Array<{ id: PlayerColor; label: string }> = [
 ]
 
 const emptyState: GameState = {
+  roomCode: '',
   phase: 'lobby',
   players: [],
   pile: [],
@@ -74,8 +77,13 @@ const emptyState: GameState = {
     lastPresident: null,
     topWinner: null,
   },
+  chat: [],
   log: [],
   joinUrl: `${window.location.origin}/join`,
+}
+
+function isPileCloser(card: Card) {
+  return card.rank === 2 && card.suit === 'oros'
 }
 
 function App() {
@@ -83,26 +91,37 @@ function App() {
   return isPhone ? <PlayerScreen /> : <HostScreen />
 }
 
-function useSocketState(player = false) {
+function roomCodeFromUrl() {
+  return new URLSearchParams(window.location.search).get('room') || ''
+}
+
+function useSocketState(player = false, requestedRoomCode = '') {
   const [state, setState] = useState<GameState>(emptyState)
   const [connected, setConnected] = useState(() => socket.connected)
 
   useEffect(() => {
     const eventName = player ? 'playerState' : 'tableState'
-    const onState = (nextState: GameState) => setState(nextState)
+    const onState = (nextState: GameState) => {
+      setState(nextState)
+      if (!player && nextState.roomCode) {
+        window.localStorage.setItem('el-presidente-room', nextState.roomCode)
+        window.history.replaceState(null, '', `/?room=${nextState.roomCode}`)
+      }
+    }
     const onConnect = () => setConnected(true)
     const onDisconnect = () => setConnected(false)
 
     socket.on(eventName, onState)
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
+    if (!player || requestedRoomCode) socket.emit('watchRoom', requestedRoomCode, () => undefined)
 
     return () => {
       socket.off(eventName, onState)
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
     }
-  }, [player])
+  }, [player, requestedRoomCode])
 
   return { state, connected }
 }
@@ -120,11 +139,12 @@ function useCountdown(state: GameState) {
 }
 
 function HostScreen() {
-  const { state, connected } = useSocketState()
+  const [hostRoomCode] = useState(() => roomCodeFromUrl() || window.localStorage.getItem('el-presidente-room') || '')
+  const { state, connected } = useSocketState(false, hostRoomCode)
   const [qr, setQr] = useState('')
   const [rulesOpen, setRulesOpen] = useState(false)
   const seconds = useCountdown(state)
-  const humanPlayers = state.players.filter((player) => !player.isComputer)
+  const humanPlayers = state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected)
   const canStart = humanPlayers.length >= minimumHumansWithComputer && state.phase !== 'playing'
 
   useEffect(() => {
@@ -150,8 +170,12 @@ function HostScreen() {
         <div className="qr-panel">
           <Smartphone size={30} />
           <h2>Join the game</h2>
+          <div className="room-code-card">
+            <span>Room code</span>
+            <strong>{state.roomCode || '...'}</strong>
+          </div>
           {qr && <img src={qr} alt="QR code to join the El Presidente table" />}
-          <span>Scan with your phone camera to join</span>
+          <span>Scan or enter the room code to join</span>
           <p>{state.joinUrl}</p>
         </div>
         <div className="host-actions">
@@ -256,6 +280,7 @@ function HostScreen() {
             <p key={`${line}-${index}`}>{line}</p>
           ))}
         </div>
+        <ChatPanel messages={state.chat} canSend={false} />
       </aside>
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </main>
@@ -263,8 +288,11 @@ function HostScreen() {
 }
 
 function PlayerScreen() {
-  const { state, connected } = useSocketState(true)
+  const initialRoomCode = roomCodeFromUrl()
+  const [requestedRoomCode, setRequestedRoomCode] = useState(initialRoomCode)
+  const { state, connected } = useSocketState(true, requestedRoomCode)
   const [name, setName] = useState('')
+  const [roomCode, setRoomCode] = useState(initialRoomCode)
   const [icon, setIcon] = useState<PlayerIcon>('star')
   const [color, setColor] = useState<PlayerColor>('gold')
   const [joined, setJoined] = useState(false)
@@ -274,23 +302,50 @@ function PlayerScreen() {
   const seconds = useCountdown(state)
   const hand = useMemo(() => state.hand || [], [state.hand])
   const isTurn = state.currentTurnId === state.selfId
+  const selfPlayer = state.players.find((player) => player.id === state.selfId)
+  const canChat = joined && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt)
+  const requiredPlayCount = state.pile.length || 0
 
   const legalCardIds = useMemo(() => {
     if (!state.pile.length) return new Set(hand.map((card) => card.id))
     return new Set(hand.filter((card) => card.strength > state.pile[0].strength).map((card) => card.id))
   }, [hand, state.pile])
   const selectedCards = useMemo(() => selected.map((id) => hand.find((card) => card.id === id)).filter((card): card is Card => Boolean(card)), [hand, selected])
+  const selectedClosesPile = selectedCards.some(isPileCloser)
   const selectableCardIds = useMemo(() => {
     if (!selectedCards.length) return legalCardIds
     const selectedRank = selectedCards[0].rank
-    return new Set(hand.filter((card) => legalCardIds.has(card.id) && card.rank === selectedRank).map((card) => card.id))
-  }, [hand, legalCardIds, selectedCards])
+    return new Set(
+      hand
+        .filter((card) => {
+          if (selected.includes(card.id)) return true
+          if (!legalCardIds.has(card.id) || card.rank !== selectedRank) return false
+          if (!requiredPlayCount || selectedClosesPile) return true
+          return selected.length < requiredPlayCount
+        })
+        .map((card) => card.id),
+    )
+  }, [hand, legalCardIds, requiredPlayCount, selected, selectedCards, selectedClosesPile])
+  const canPlaySelected = Boolean(
+    selected.length && (!requiredPlayCount || selectedClosesPile || selected.length === requiredPlayCount),
+  )
 
   const join = (event: React.FormEvent) => {
     event.preventDefault()
-    socket.emit('join', { name, icon, color }, (reply: { ok: boolean; error?: string }) => {
+    const nextRoomCode = roomCode.trim().toUpperCase()
+    if (!nextRoomCode) {
+      setError('Enter the room code from the table.')
+      return
+    }
+    setRequestedRoomCode(nextRoomCode)
+    socket.emit('join', { name, icon, color, roomCode: nextRoomCode }, (reply: { ok: boolean; error?: string; roomCode?: string }) => {
       if (reply.ok) {
         setJoined(true)
+        if (reply.roomCode) {
+          setRoomCode(reply.roomCode)
+          setRequestedRoomCode(reply.roomCode)
+          window.history.replaceState(null, '', `/join?room=${reply.roomCode}`)
+        }
         setError('')
       } else {
         setError(reply.error || 'Could not join.')
@@ -350,6 +405,15 @@ function PlayerScreen() {
               autoComplete="name"
               autoFocus
             />
+            <label htmlFor="roomCode">Room code</label>
+            <input
+              id="roomCode"
+              value={roomCode}
+              onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+              maxLength={12}
+              autoComplete="off"
+              placeholder="Enter code from the table"
+            />
             <IdentityPicker icon={icon} color={color} onIconChange={setIcon} onColorChange={setColor} />
             <button type="submit">
               <Send size={18} />
@@ -376,8 +440,8 @@ function PlayerScreen() {
       />
       <header className="phone-header">
         <div>
-          <span>{state.selfName}</span>
-          <h1>{isTurn ? 'Your turn' : `${state.currentPlayerName || 'Table'} is up`}</h1>
+          <span>{state.selfSpectator ? `Watching ${state.roomCode}` : state.selfName}</span>
+          <h1>{state.selfSpectator ? 'Spectating' : isTurn ? 'Your turn' : `${state.currentPlayerName || 'Table'} is up`}</h1>
         </div>
         <div className="mini-timer">{seconds}s</div>
       </header>
@@ -392,29 +456,38 @@ function PlayerScreen() {
       </section>
 
       <section className="hand-grid" aria-label="Your cards">
-        {hand.map((card, index) => (
-          <button
-            key={card.id}
-            type="button"
-            className={`hand-card ${selected.includes(card.id) ? 'selected' : ''}`}
-            disabled={!isTurn || !selectableCardIds.has(card.id)}
-            onClick={() => toggleCard(card)}
-          >
-            <SpanishCard card={card} compact index={index} />
-          </button>
-        ))}
+        {state.selfSpectator ? (
+          <div className="spectator-panel">
+            <Eye size={22} />
+            <strong>Watching this round</strong>
+            <span>You will join the next deal in room {state.roomCode}.</span>
+          </div>
+        ) : (
+          hand.map((card, index) => (
+            <button
+              key={card.id}
+              type="button"
+              className={`hand-card ${selected.includes(card.id) ? 'selected' : ''}`}
+              disabled={!isTurn || !selectableCardIds.has(card.id)}
+              onClick={() => toggleCard(card)}
+            >
+              <SpanishCard card={card} compact index={index} />
+            </button>
+          ))
+        )}
       </section>
+      <ChatPanel messages={state.chat} canSend={canChat} />
 
       <footer className="phone-actions">
         <div className="selection-meter">
           <Sparkles size={16} />
           <span>{selected.length ? `${selected.length} selected` : isTurn ? 'Choose cards' : 'Waiting'}</span>
         </div>
-        <button type="button" onClick={playSelected} disabled={!isTurn || !selected.length}>
+        <button type="button" onClick={playSelected} disabled={state.selfSpectator || !isTurn || !canPlaySelected}>
           <Play size={18} />
           Play cards
         </button>
-        <button type="button" className="secondary" onClick={passTurn} disabled={!isTurn}>
+        <button type="button" className="secondary" onClick={passTurn} disabled={state.selfSpectator || !isTurn}>
           Pass
         </button>
         <button type="button" className="secondary" onClick={() => setRulesOpen(true)}>
@@ -425,6 +498,60 @@ function PlayerScreen() {
       {error && <p className="error-text floating">{error}</p>}
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </main>
+  )
+}
+
+function ChatPanel({ messages, canSend }: { messages: ChatMessage[]; canSend: boolean }) {
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  const sendMessage = (event: React.FormEvent) => {
+    event.preventDefault()
+    const text = message.trim()
+    if (!text) return
+    socket.emit('sendChat', text, (reply: { ok: boolean; error?: string }) => {
+      if (reply.ok) {
+        setMessage('')
+        setError('')
+      } else {
+        setError(reply.error || 'Could not send.')
+      }
+    })
+  }
+
+  return (
+    <section className="chat-panel">
+      <h2>
+        <MessageCircle size={18} />
+        Room Chat
+      </h2>
+      <div className="chat-feed">
+        {messages.length ? (
+          messages.map((item) => (
+            <p key={item.id}>
+              <strong>{item.name}</strong>
+              <span>{item.text}</span>
+            </p>
+          ))
+        ) : (
+          <p className="empty-chat">No messages yet</p>
+        )}
+      </div>
+      {canSend && (
+        <form className="chat-form" onSubmit={sendMessage}>
+          <input
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            maxLength={180}
+            placeholder="Message active players"
+          />
+          <button type="submit" aria-label="Send chat message" disabled={!message.trim()}>
+            <Send size={16} />
+          </button>
+        </form>
+      )}
+      {error && <p className="chat-error">{error}</p>}
+    </section>
   )
 }
 
@@ -668,9 +795,10 @@ function RulesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <li>The first player leads with any card when the pile is empty.</li>
           <li>Cards rank from 3 up to 12, then 1, then 2. The 2 of Coins is the absolute highest card.</li>
           <li>After a lead, play one or more cards of the same rank that are higher than the current pile rank.</li>
+          <li>If the pile has two or more cards, every play must match that number of cards until the pile closes.</li>
           <li>Playing the 2 of Coins closes the pile immediately, and that player leads the next pile.</li>
           <li>You cannot pass on an empty pile. Once a card is on the pile, you may pass if you have no useful play or want to hold your cards.</li>
-          <li>When every other active player passes, the pile clears and the next player leads any card.</li>
+          <li>When every other active player passes, the pile clears and the last player who played leads again.</li>
           <li>The first player to run out of cards wins the round and becomes President.</li>
           <li>The last player remaining becomes Fool. Everyone else is Neutral.</li>
           <li>If only two humans are seated, the table adds a Computer Player as the third seat.</li>

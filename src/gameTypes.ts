@@ -39,6 +39,15 @@ export type Player = {
   finishedAt: number | null
   wins: number
   isComputer?: boolean
+  isSpectator?: boolean
+}
+
+export type ChatMessage = {
+  id: string
+  playerId: string
+  name: string
+  text: string
+  sentAt: string
 }
 
 export type RecentWinner = {
@@ -57,6 +66,7 @@ export type ScoreSummary = {
 }
 
 export type GameState = {
+  roomCode: string
   phase: 'lobby' | 'playing' | 'finished'
   players: Player[]
   pile: Card[]
@@ -70,9 +80,11 @@ export type GameState = {
   round: number
   recentWinners: RecentWinner[]
   scoreSummary: ScoreSummary
+  chat: ChatMessage[]
   log: string[]
   joinUrl: string
   selfId?: string | null
   selfName?: string
+  selfSpectator?: boolean
   hand?: Card[]
 }

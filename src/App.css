@@ -103,6 +103,7 @@ p {
 
 .scoreboard,
 .event-log,
+.chat-panel,
 .qr-panel {
   border: 1px solid rgba(255, 240, 196, 0.18);
   background: rgba(17, 10, 6, 0.72);
@@ -118,6 +119,7 @@ p {
 
 .scoreboard:hover,
 .event-log:hover,
+.chat-panel:hover,
 .qr-panel:hover {
   transform: translateY(-2px);
   border-color: rgba(242, 191, 87, 0.42);
@@ -126,6 +128,7 @@ p {
 
 .scoreboard h2,
 .event-log h2,
+.chat-panel h2,
 .qr-panel h2 {
   display: flex;
   gap: 8px;
@@ -133,6 +136,33 @@ p {
   margin-bottom: 14px;
   color: #fff0c4;
   font-size: 17px;
+}
+
+.room-code-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 4px 0 12px;
+  padding: 12px;
+  border: 1px solid rgba(242, 191, 87, 0.42);
+  border-radius: 8px;
+  background: rgba(242, 191, 87, 0.12);
+  text-align: center;
+}
+
+.room-code-card span {
+  color: #d8c7a1;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.room-code-card strong {
+  color: #fff1bf;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 30px;
+  letter-spacing: 0.12em;
 }
 
 .score-row {
@@ -294,6 +324,75 @@ p {
   line-height: 1.3;
 }
 
+.score-rail .chat-panel {
+  margin-top: 16px;
+}
+
+.chat-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-feed {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  overflow: auto;
+}
+
+.chat-feed p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 240, 196, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 248, 224, 0.06);
+  color: #eedfbd;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.chat-feed strong {
+  color: #f7d783;
+  font-size: 12px;
+}
+
+.chat-feed span {
+  overflow-wrap: anywhere;
+}
+
+.chat-feed .empty-chat {
+  color: #9f8f70;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
+.chat-form input {
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 240, 196, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 248, 224, 0.08);
+  color: #fff4d5;
+}
+
+.chat-form button {
+  min-height: 42px;
+  padding: 0;
+}
+
+.chat-error {
+  margin: 0;
+  color: #ffb7aa;
+  font-size: 12px;
+}
+
 .table-stage {
   position: relative;
   display: grid;
@@ -377,14 +476,7 @@ p {
 }
 
 .table-felt::after {
-  width: 54%;
-  height: 18%;
-  left: 23%;
-  top: 9%;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(255, 236, 168, 0.16), transparent 68%);
-  filter: blur(8px);
-  animation: table-shine 5s ease-in-out infinite alternate;
+  display: none;
 }
 
 .felt-emblem {
@@ -476,12 +568,7 @@ p {
 }
 
 .next-player::before {
-  content: '';
-  position: absolute;
-  inset: -80% -20%;
-  background: linear-gradient(110deg, transparent 38%, rgba(255, 230, 156, 0.14), transparent 62%);
-  transform: translateX(-65%);
-  animation: panel-sweep 4s ease-in-out infinite;
+  display: none;
 }
 
 .next-player strong {
@@ -631,12 +718,7 @@ p {
 }
 
 .seat-avatar::after {
-  content: '';
-  position: absolute;
-  inset: -45%;
-  background: linear-gradient(120deg, transparent 38%, rgba(255, 255, 255, 0.42), transparent 62%);
-  transform: translateX(-65%) rotate(12deg);
-  animation: avatar-shine 4.2s ease-in-out infinite;
+  display: none;
 }
 
 .seat-avatar.compact,
@@ -1376,6 +1458,41 @@ p {
   background: rgba(242, 191, 87, 0.24);
   outline: 2px solid #f2bf57;
   box-shadow: 0 18px 34px rgba(242, 191, 87, 0.2);
+}
+
+.spectator-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 20px;
+  border: 1px solid rgba(255, 240, 196, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 248, 224, 0.06);
+  color: #d8c7a1;
+  text-align: center;
+}
+
+.spectator-panel strong {
+  color: #fff1bf;
+  font-size: 18px;
+}
+
+.spectator-panel span {
+  max-width: 260px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.phone-shell .chat-panel {
+  margin: 0 18px 14px;
+  padding: 12px;
+  box-shadow: none;
+}
+
+.phone-shell .chat-feed {
+  max-height: 118px;
 }
 
 .phone-actions {

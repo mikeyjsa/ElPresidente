@@ -14,9 +14,11 @@ const COMPUTER_PLAYER_NAME = 'Computer Player'
 const COMPUTER_TURN_DELAY = 1200
 const SCORE_FILE = path.join(process.cwd(), 'data', 'scores.json')
 const RECENT_WINNER_LIMIT = 12
+const CHAT_LIMIT = 40
+const ROOM_CODE_LENGTH = 5
 const PLAYER_ICONS = ['crown', 'sparkles', 'flame', 'heart', 'shield', 'club', 'star', 'sun', 'bolt', 'diamond', 'moon', 'gem']
 const PLAYER_COLORS = ['gold', 'green', 'red', 'blue', 'purple', 'teal', 'rose', 'slate']
-let computerTurnTimer = null
+const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -54,41 +56,91 @@ const ranks = [
 
 function loadScores() {
   try {
-    return JSON.parse(fs.readFileSync(SCORE_FILE, 'utf8'))
+    const saved = JSON.parse(fs.readFileSync(SCORE_FILE, 'utf8'))
+    if (saved.rooms) return saved
+    return {
+      rooms: {
+        TABLE: {
+          winners: saved.winners || {},
+          recentWinners: saved.recentWinners || [],
+          round: Number(saved.round) || 0,
+        },
+      },
+    }
   } catch {
-    return { winners: {}, recentWinners: [], round: 0 }
+    return { rooms: {} }
   }
 }
 
 const savedScores = loadScores()
 
-const state = {
-  phase: 'lobby',
-  players: [],
-  pile: [],
-  currentTurnId: null,
-  turnStartedAt: null,
-  passCount: 0,
-  finishOrder: [],
-  round: Number(savedScores.round) || 0,
-  winners: savedScores.winners || {},
-  recentWinners: savedScores.recentWinners || [],
-  log: ['Scan the QR code to join the table.'],
+const rooms = new Map()
+let state = getRoom('TABLE')
+
+function normalizeRoomCode(rawCode = '') {
+  return String(rawCode || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 12)
+}
+
+function randomRoomCode() {
+  let code = ''
+  for (let index = 0; index < ROOM_CODE_LENGTH; index += 1) {
+    code += ROOM_CHARS[Math.floor(Math.random() * ROOM_CHARS.length)]
+  }
+  return code
+}
+
+function roomScore(code) {
+  return savedScores.rooms?.[code] || { winners: {}, recentWinners: [], round: 0 }
+}
+
+function createRoomState(code) {
+  const score = roomScore(code)
+  return {
+    code,
+    phase: 'lobby',
+    players: [],
+    pile: [],
+    pileOwnerId: null,
+    currentTurnId: null,
+    turnStartedAt: null,
+    passCount: 0,
+    finishOrder: [],
+    round: Number(score.round) || 0,
+    winners: score.winners || {},
+    recentWinners: score.recentWinners || [],
+    chat: [],
+    log: [`Room ${code} is ready. Scan or enter the room code to join.`],
+    computerTurnTimer: null,
+  }
+}
+
+function getRoom(rawCode) {
+  let code = normalizeRoomCode(rawCode)
+  if (!code) {
+    do {
+      code = randomRoomCode()
+    } while (rooms.has(code) || savedScores.rooms?.[code])
+  }
+  if (!rooms.has(code)) rooms.set(code, createRoomState(code))
+  return rooms.get(code)
 }
 
 function saveScores() {
   fs.mkdirSync(path.dirname(SCORE_FILE), { recursive: true })
+  for (const room of rooms.values()) {
+    savedScores.rooms[room.code] = {
+      round: room.round,
+      winners: room.winners,
+      recentWinners: room.recentWinners,
+    }
+  }
   fs.writeFileSync(
     SCORE_FILE,
-    JSON.stringify(
-      {
-        round: state.round,
-        winners: state.winners,
-        recentWinners: state.recentWinners,
-      },
-      null,
-      2,
-    ),
+    JSON.stringify(savedScores, null, 2),
   )
 }
 
@@ -136,7 +188,7 @@ function createDeck() {
       id: `${rank.value}-${suit.id}`,
       rank: rank.value,
       rankLabel: rank.label,
-      strength: rank.strength,
+      strength: rank.value === 2 && suit.id === 'oros' ? rank.strength + 1 : rank.strength,
       suit: suit.id,
       suitName: suit.name,
       suitSymbol: suit.symbol,
@@ -170,6 +222,7 @@ function publicPlayer(player) {
     finishedAt: player.finishedAt,
     wins: state.winners[player.name] || 0,
     isComputer: Boolean(player.isComputer),
+    isSpectator: Boolean(player.isSpectator),
   }
 }
 
@@ -186,6 +239,7 @@ function scoreSummary() {
 function tableState() {
   const currentPlayer = state.players.find((p) => p.id === state.currentTurnId)
   return {
+    roomCode: state.code,
     phase: state.phase,
     players: state.players.map(publicPlayer),
     pile: state.pile,
@@ -199,8 +253,9 @@ function tableState() {
     round: state.round,
     recentWinners: state.recentWinners,
     scoreSummary: scoreSummary(),
+    chat: state.chat.slice(-CHAT_LIMIT),
     log: state.log.slice(-8).reverse(),
-    joinUrl: `${publicBaseUrl()}/join`,
+    joinUrl: `${publicBaseUrl()}/join?room=${state.code}`,
   }
 }
 
@@ -209,16 +264,17 @@ function playerState(player) {
     ...tableState(),
     selfId: player?.id || null,
     selfName: player?.name || '',
-    hand: player ? sortHand(player.hand) : [],
+    selfSpectator: Boolean(player?.isSpectator),
+    hand: player && !player.isSpectator ? sortHand(player.hand) : [],
   }
 }
 
 function activePlayers() {
-  return state.players.filter((player) => !player.finishedAt)
+  return state.players.filter((player) => !player.finishedAt && !player.isSpectator)
 }
 
 function humanPlayers() {
-  return state.players.filter((player) => !player.isComputer)
+  return state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected)
 }
 
 function playerIdentity(rawIdentity = {}) {
@@ -254,6 +310,7 @@ function ensureComputerPlayer() {
     hand: [],
     connected: true,
     finishedAt: null,
+    isSpectator: false,
     isComputer: true,
   })
   state.log.push(`${COMPUTER_PLAYER_NAME} joined as the third seat.`)
@@ -268,7 +325,7 @@ function nextTurn(afterId = state.currentTurnId) {
   const fullIndex = state.players.findIndex((player) => player.id === afterId)
   for (let offset = 1; offset <= state.players.length; offset += 1) {
     const next = state.players[(fullIndex + offset + state.players.length) % state.players.length]
-    if (next && !next.finishedAt) {
+    if (next && !next.finishedAt && !next.isSpectator) {
       state.currentTurnId = next.id
       state.turnStartedAt = Date.now()
       return
@@ -279,6 +336,7 @@ function nextTurn(afterId = state.currentTurnId) {
 function clearPile(reason) {
   if (state.pile.length) state.log.push(reason)
   state.pile = []
+  state.pileOwnerId = null
   state.passCount = 0
 }
 
@@ -286,6 +344,18 @@ function legalCardsFor(player) {
   if (!state.pile.length) return sortHand(player.hand)
   const topStrength = state.pile[0].strength
   return sortHand(player.hand).filter((card) => card.strength > topStrength)
+}
+
+function legalCardGroupsFor(player) {
+  const requiredCount = state.pile.length || 1
+  const legalCards = legalCardsFor(player)
+  const groups = new Map()
+  for (const card of legalCards) {
+    groups.set(card.rank, [...(groups.get(card.rank) || []), card])
+  }
+  const closer = sortHand(player.hand).find(isPileCloser)
+  if (closer && state.pile.length) return [[closer]]
+  return [...groups.values()].filter((cards) => !state.pile.length || cards.length >= requiredCount).map((cards) => cards.slice(0, requiredCount))
 }
 
 function isPileCloser(card) {
@@ -297,6 +367,7 @@ function playCards(player, cards) {
   const closesPile = cards.some(isPileCloser)
   player.hand = player.hand.filter((item) => !cardIds.has(item.id))
   state.pile = cards
+  state.pileOwnerId = player.id
   state.passCount = 0
   state.log.push(`${player.name} played ${cards.map((card) => `${card.rankLabel} of ${card.suitName}`).join(', ')}.`)
   if (closesPile) clearPile(`${player.name} closed the pile with the 2 of Coins and leads again.`)
@@ -313,8 +384,16 @@ function passPlayer(player, reason = 'passed') {
   state.passCount += 1
   state.log.push(`${player.name} ${reason}.`)
   if (state.passCount >= Math.max(1, activePlayers().length - 1)) {
+    const pileOwnerId = state.pileOwnerId
     clearPile('Everyone else passed. The pile is cleared.')
+    const pileOwner = state.players.find((item) => item.id === pileOwnerId && !item.finishedAt)
+    if (pileOwner) {
+      state.currentTurnId = pileOwner.id
+      state.turnStartedAt = Date.now()
+      return { closed: true }
+    }
   }
+  return { closed: false }
 }
 
 function endRound() {
@@ -347,16 +426,24 @@ function endRound() {
   state.phase = 'finished'
   state.currentTurnId = null
   state.turnStartedAt = null
+  state.players.forEach((player) => {
+    if (player.isSpectator && player.connected) player.isSpectator = false
+  })
   state.log.push(`${winner || 'Nobody'} is El Presidente.`)
 }
 
 function dealRound() {
+  state.players = state.players.filter((player) => player.isComputer || player.connected)
+  state.players.forEach((player) => {
+    player.isSpectator = false
+  })
   reconcileComputerPlayer()
   ensureComputerPlayer()
   const deck = shuffle(createDeck())
   state.round += 1
   state.phase = 'playing'
   state.pile = []
+  state.pileOwnerId = null
   state.passCount = 0
   state.finishOrder = []
   state.players.forEach((player) => {
@@ -375,7 +462,7 @@ function dealRound() {
 }
 
 function emitAll() {
-  io.emit('tableState', tableState())
+  io.to(state.code).emit('tableState', tableState())
   state.players.filter((player) => !player.isComputer).forEach((player) => {
     io.to(player.id).emit('playerState', playerState(player))
   })
@@ -383,16 +470,18 @@ function emitAll() {
 }
 
 function scheduleComputerTurn() {
-  if (computerTurnTimer) {
-    clearTimeout(computerTurnTimer)
-    computerTurnTimer = null
+  if (state.computerTurnTimer) {
+    clearTimeout(state.computerTurnTimer)
+    state.computerTurnTimer = null
   }
   if (state.phase !== 'playing') return
   const player = state.players.find((item) => item.id === state.currentTurnId)
   if (!player?.isComputer || player.finishedAt) return
 
-  computerTurnTimer = setTimeout(() => {
-    computerTurnTimer = null
+  const roomCode = state.code
+  state.computerTurnTimer = setTimeout(() => {
+    state = getRoom(roomCode)
+    state.computerTurnTimer = null
     takeComputerTurn(player.id)
   }, COMPUTER_TURN_DELAY)
 }
@@ -403,9 +492,9 @@ function takeComputerTurn(playerId) {
     return
   }
 
-  const [card] = legalCardsFor(player)
-  if (card) {
-    const { closesPile } = playCards(player, [card])
+  const [cards] = legalCardGroupsFor(player)
+  if (cards) {
+    const { closesPile } = playCards(player, cards)
     if (closesPile && !player.finishedAt) {
       state.currentTurnId = player.id
       state.turnStartedAt = Date.now()
@@ -413,7 +502,11 @@ function takeComputerTurn(playerId) {
       return
     }
   } else {
-    passPlayer(player)
+    const { closed } = passPlayer(player)
+    if (closed) {
+      emitAll()
+      return
+    }
   }
   nextTurn(player.id)
   emitAll()
@@ -424,18 +517,36 @@ const io = new Server(httpServer, {
   cors: { origin: '*' },
 })
 
+function attachSocketToRoom(socket, rawCode) {
+  const room = getRoom(rawCode)
+  if (socket.data.roomCode && socket.data.roomCode !== room.code) socket.leave(socket.data.roomCode)
+  socket.join(room.code)
+  socket.data.roomCode = room.code
+  state = room
+  return room
+}
+
+function setRoomFromSocket(socket) {
+  state = getRoom(socket.data.roomCode || 'TABLE')
+  return state
+}
+
 io.on('connection', (socket) => {
+  attachSocketToRoom(socket, socket.handshake.query?.room || 'TABLE')
   socket.emit('tableState', tableState())
 
+  socket.on('watchRoom', (roomCode, reply) => {
+    attachSocketToRoom(socket, roomCode)
+    reply?.({ ok: true, roomCode: state.code })
+    socket.emit('tableState', tableState())
+  })
+
   socket.on('join', (payload, reply) => {
+    attachSocketToRoom(socket, typeof payload === 'object' && payload ? payload.roomCode : socket.data.roomCode)
     const name = String(typeof payload === 'object' && payload ? payload.name : payload || '').trim().slice(0, 20)
     const identity = playerIdentity(payload)
     if (!name) {
       reply?.({ ok: false, error: 'Enter a name.' })
-      return
-    }
-    if (state.phase === 'playing') {
-      reply?.({ ok: false, error: 'A round is already in progress.' })
       return
     }
     const existing = state.players.find((player) => !player.isComputer && player.name.toLowerCase() === name.toLowerCase())
@@ -445,8 +556,9 @@ io.on('connection', (socket) => {
       existing.icon = identity.icon
       existing.color = identity.color
       existing.hand = existing.hand || []
-      reply?.({ ok: true, id: socket.id })
+      reply?.({ ok: true, id: socket.id, roomCode: state.code, spectator: Boolean(existing.isSpectator) })
     } else {
+      const joinsAsSpectator = state.phase === 'playing'
       state.players.push({
         id: socket.id,
         name,
@@ -456,16 +568,18 @@ io.on('connection', (socket) => {
         hand: [],
         connected: true,
         finishedAt: null,
+        isSpectator: joinsAsSpectator,
         isComputer: false,
       })
-      state.log.push(`${name} joined the table.`)
-      reply?.({ ok: true, id: socket.id })
+      state.log.push(joinsAsSpectator ? `${name} joined room ${state.code} as a spectator.` : `${name} joined room ${state.code}.`)
+      reply?.({ ok: true, id: socket.id, roomCode: state.code, spectator: joinsAsSpectator })
     }
     reconcileComputerPlayer()
     emitAll()
   })
 
   socket.on('startGame', (reply) => {
+    setRoomFromSocket(socket)
     if (state.phase === 'playing') {
       reply?.({ ok: false, error: 'A round is already in progress.' })
       return
@@ -480,25 +594,29 @@ io.on('connection', (socket) => {
   })
 
   socket.on('resetLobby', () => {
-    if (computerTurnTimer) {
-      clearTimeout(computerTurnTimer)
-      computerTurnTimer = null
+    setRoomFromSocket(socket)
+    if (state.computerTurnTimer) {
+      clearTimeout(state.computerTurnTimer)
+      state.computerTurnTimer = null
     }
     state.phase = 'lobby'
     state.players = []
     state.pile = []
+    state.pileOwnerId = null
     state.currentTurnId = null
     state.turnStartedAt = null
     state.passCount = 0
     state.finishOrder = []
-    state.log = ['Table reset. Scan the QR code to join again.']
-    io.emit('lobbyReset')
+    state.chat = []
+    state.log = [`Room ${state.code} reset. Scan or enter the room code to join again.`]
+    io.to(state.code).emit('lobbyReset', { roomCode: state.code })
     emitAll()
   })
 
   socket.on('playCards', (cardIds, reply) => {
+    setRoomFromSocket(socket)
     const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
-    if (!player || state.phase !== 'playing' || state.currentTurnId !== player.id || player.finishedAt) {
+    if (!player || player.isSpectator || state.phase !== 'playing' || state.currentTurnId !== player.id || player.finishedAt) {
       reply?.({ ok: false, error: 'It is not your turn.' })
       return
     }
@@ -517,13 +635,18 @@ io.on('connection', (socket) => {
       reply?.({ ok: false, error: 'Play cards of the same rank together.' })
       return
     }
-    if (state.pile.length && selected[0].strength <= state.pile[0].strength) {
+    const closesPile = selected.some(isPileCloser)
+    if (state.pile.length && !closesPile && selected.length !== state.pile.length) {
+      reply?.({ ok: false, error: `Play ${state.pile.length} card${state.pile.length === 1 ? '' : 's'} to match the pile.` })
+      return
+    }
+    if (state.pile.length && !closesPile && selected[0].strength <= state.pile[0].strength) {
       reply?.({ ok: false, error: 'Play cards higher than the pile.' })
       return
     }
-    const { closesPile } = playCards(player, selected)
+    const result = playCards(player, selected)
     reply?.({ ok: true })
-    if (closesPile && !player.finishedAt) {
+    if (result.closesPile && !player.finishedAt) {
       state.currentTurnId = player.id
       state.turnStartedAt = Date.now()
     } else {
@@ -533,8 +656,9 @@ io.on('connection', (socket) => {
   })
 
   socket.on('passTurn', (reply) => {
+    setRoomFromSocket(socket)
     const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
-    if (!player || state.phase !== 'playing' || state.currentTurnId !== player.id) {
+    if (!player || player.isSpectator || state.phase !== 'playing' || state.currentTurnId !== player.id) {
       reply?.({ ok: false, error: 'It is not your turn.' })
       return
     }
@@ -542,13 +666,38 @@ io.on('connection', (socket) => {
       reply?.({ ok: false, error: 'Lead with a card before passing.' })
       return
     }
-    passPlayer(player)
+    const { closed } = passPlayer(player)
     reply?.({ ok: true })
-    nextTurn(player.id)
+    if (!closed) nextTurn(player.id)
+    emitAll()
+  })
+
+  socket.on('sendChat', (message, reply) => {
+    setRoomFromSocket(socket)
+    const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (!player || player.isSpectator || player.finishedAt) {
+      reply?.({ ok: false, error: 'Only active players can chat.' })
+      return
+    }
+    const text = String(message || '').trim().slice(0, 180)
+    if (!text) {
+      reply?.({ ok: false, error: 'Enter a message.' })
+      return
+    }
+    state.chat.push({
+      id: `${Date.now()}-${socket.id}`,
+      playerId: player.id,
+      name: player.name,
+      text,
+      sentAt: new Date().toISOString(),
+    })
+    state.chat = state.chat.slice(-CHAT_LIMIT)
+    reply?.({ ok: true })
     emitAll()
   })
 
   socket.on('disconnect', () => {
+    setRoomFromSocket(socket)
     const player = state.players.find((item) => item.id === socket.id)
     if (player) {
       player.connected = false
@@ -559,13 +708,16 @@ io.on('connection', (socket) => {
 })
 
 setInterval(() => {
-  if (state.phase !== 'playing' || !state.currentTurnId || !state.turnStartedAt) return
-  if (Date.now() - state.turnStartedAt > TURN_SECONDS * 1000) {
-    const player = state.players.find((item) => item.id === state.currentTurnId)
-    if (player) {
-      passPlayer(player, 'timed out and passed')
-      nextTurn(player.id)
-      emitAll()
+  for (const room of rooms.values()) {
+    state = room
+    if (state.phase !== 'playing' || !state.currentTurnId || !state.turnStartedAt) continue
+    if (Date.now() - state.turnStartedAt > TURN_SECONDS * 1000) {
+      const player = state.players.find((item) => item.id === state.currentTurnId)
+      if (player) {
+        const { closed } = passPlayer(player, 'timed out and passed')
+        if (!closed) nextTurn(player.id)
+        emitAll()
+      }
     }
   }
 }, 1000)
