@@ -101,6 +101,7 @@ https://elpresidente-production.up.railway.app/
 
 ## Project Update Log
 
+- 2026-06-01 22:25 SAST: Audited the Spanish card image links and replaced the incorrect `1-oros` card-back image with an Ace-of-coins card face.
 - 2026-06-01 00:46 SAST: Verified all 12 player icon choices render, select correctly, update the preview avatar, and fit on a phone viewport.
 - 2026-06-01 00:37 SAST: Made Reset clear the current table seats, old join names, hands, pile, turn state, and joined phone forms.
 - 2026-06-01 00:21 SAST: Added a larger, animated player icon picker with livelier avatar effects.
