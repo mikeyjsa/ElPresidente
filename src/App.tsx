@@ -77,6 +77,7 @@ const emptyState: GameState = {
     lastPresident: null,
     topWinner: null,
   },
+  skipNotice: null,
   chat: [],
   log: [],
   joinUrl: `${window.location.origin}/join`,
@@ -210,6 +211,7 @@ function HostScreen() {
           key={state.currentTurnId || 'no-turn'}
           message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
         />
+        <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
         <div className="top-controls">
           <div className="table-stat">
             <UsersRound size={16} />
@@ -438,6 +440,7 @@ function PlayerScreen() {
         key={state.currentTurnId || 'no-turn'}
         message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
       />
+      <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
       <header className="phone-header">
         <div>
           <span>{state.selfSpectator ? `Watching ${state.roomCode}` : state.selfName}</span>
@@ -498,6 +501,23 @@ function PlayerScreen() {
       {error && <p className="error-text floating">{error}</p>}
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </main>
+  )
+}
+
+function SkipNotice({
+  notice,
+  selfId,
+}: {
+  notice: GameState['skipNotice']
+  selfId?: string | null
+}) {
+  if (!notice) return null
+  const isSelf = notice.playerId === selfId
+  return (
+    <div className={`skip-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
+      <Sparkles size={18} />
+      <span>{isSelf ? 'You were skipped' : `${notice.playerName} was skipped`}</span>
+    </div>
   )
 }
 

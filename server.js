@@ -112,6 +112,7 @@ function createRoomState(code) {
     round: Number(score.round) || 0,
     winners: score.winners || {},
     recentWinners: score.recentWinners || [],
+    skipNotice: null,
     chat: [],
     log: [`Room ${code} is ready. Scan or enter the room code to join.`],
     computerTurnTimer: null,
@@ -253,6 +254,7 @@ function tableState() {
     round: state.round,
     recentWinners: state.recentWinners,
     scoreSummary: scoreSummary(),
+    skipNotice: state.skipNotice,
     chat: state.chat.slice(-CHAT_LIMIT),
     log: state.log.slice(-8).reverse(),
     joinUrl: `${publicBaseUrl()}/join?room=${state.code}`,
@@ -329,6 +331,11 @@ function nextTurn(afterId = state.currentTurnId, skipNext = false) {
     if (next && !next.finishedAt && !next.isSpectator) {
       if (skipNext && !skippedPlayer) {
         skippedPlayer = next
+        state.skipNotice = {
+          playerId: next.id,
+          playerName: next.name,
+          skippedAt: Date.now(),
+        }
         state.log.push(`${next.name} was skipped by a matching rank.`)
         continue
       }
@@ -452,6 +459,7 @@ function dealRound() {
   state.phase = 'playing'
   state.pile = []
   state.pileOwnerId = null
+  state.skipNotice = null
   state.passCount = 0
   state.finishOrder = []
   state.players.forEach((player) => {
@@ -613,6 +621,7 @@ io.on('connection', (socket) => {
     state.players = []
     state.pile = []
     state.pileOwnerId = null
+    state.skipNotice = null
     state.currentTurnId = null
     state.turnStartedAt = null
     state.passCount = 0

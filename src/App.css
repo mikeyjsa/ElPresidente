@@ -432,6 +432,36 @@ p {
   line-height: 1;
 }
 
+.skip-notice {
+  position: fixed;
+  left: 50%;
+  top: 18px;
+  z-index: 19;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  max-width: calc(100vw - 32px);
+  padding: 0 16px;
+  border: 1px solid rgba(248, 129, 129, 0.5);
+  border-radius: 8px;
+  background: rgba(80, 24, 16, 0.94);
+  color: #ffd9cf;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+  transform: translateX(-50%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+}
+
+.skip-notice.is-self {
+  border-color: rgba(242, 191, 87, 0.72);
+  background: rgba(93, 61, 13, 0.95);
+  color: #fff1bf;
+}
+
 .top-controls {
   position: relative;
   display: flex;

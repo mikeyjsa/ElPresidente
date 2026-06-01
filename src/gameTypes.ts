@@ -65,6 +65,12 @@ export type ScoreSummary = {
   } | null
 }
 
+export type SkipNotice = {
+  playerId: string
+  playerName: string
+  skippedAt: number
+} | null
+
 export type GameState = {
   roomCode: string
   phase: 'lobby' | 'playing' | 'finished'
@@ -80,6 +86,7 @@ export type GameState = {
   round: number
   recentWinners: RecentWinner[]
   scoreSummary: ScoreSummary
+  skipNotice: SkipNotice
   chat: ChatMessage[]
   log: string[]
   joinUrl: string
