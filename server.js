@@ -756,6 +756,14 @@ function emitAll() {
   scheduleComputerTurn()
 }
 
+function emitPauseState() {
+  io.to(state.code).emit('pauseState', {
+    paused: Boolean(state.paused),
+    pausedAt: state.pausedAt,
+    turnStartedAt: state.turnStartedAt,
+  })
+}
+
 function scheduleComputerTurn() {
   if (state.computerTurnTimer) {
     clearTimeout(state.computerTurnTimer)
@@ -1107,6 +1115,8 @@ io.on('connection', (socket) => {
     const nextPaused = Boolean(paused)
     if (state.paused === nextPaused) {
       reply?.({ ok: true })
+      emitPauseState()
+      emitAll()
       return
     }
     if (nextPaused) {
@@ -1125,6 +1135,7 @@ io.on('connection', (socket) => {
       state.log.push('Host resumed the game.')
     }
     reply?.({ ok: true })
+    emitPauseState()
     emitAll()
   })
 

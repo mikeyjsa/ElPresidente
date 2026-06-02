@@ -173,16 +173,26 @@ function useSocketState(player = false, requestedRoomCode = '') {
         window.history.replaceState(null, '', `/?room=${nextState.roomCode}`)
       }
     }
+    const onPauseState = (pauseState: Pick<GameState, 'paused' | 'pausedAt' | 'turnStartedAt'>) => {
+      setState((current) => ({
+        ...current,
+        paused: pauseState.paused,
+        pausedAt: pauseState.pausedAt,
+        turnStartedAt: pauseState.turnStartedAt,
+      }))
+    }
     const onConnect = () => setConnected(true)
     const onDisconnect = () => setConnected(false)
 
     socket.on(eventName, onState)
+    socket.on('pauseState', onPauseState)
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     if (!player || requestedRoomCode) socket.emit('watchRoom', requestedRoomCode, () => undefined)
 
     return () => {
       socket.off(eventName, onState)
+      socket.off('pauseState', onPauseState)
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
     }
@@ -304,7 +314,7 @@ function HostScreen() {
           key={state.currentTurnId || 'no-turn'}
           message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
         />
-        {state.paused && <PauseOverlay />}
+        {state.paused && <PauseOverlay onResume={togglePause} />}
         <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
         <PileNotice notice={state.pileNotice} selfId={state.selfId} />
         <div className="top-controls">
@@ -796,11 +806,17 @@ function PileNotice({
   )
 }
 
-function PauseOverlay() {
+function PauseOverlay({ onResume }: { onResume?: () => void }) {
   return (
-    <div className="pause-overlay" role="status" aria-live="polite">
+    <div className={`pause-overlay ${onResume ? 'is-host' : ''}`} role="status" aria-live="polite">
       <Pause size={34} />
       <span>Paused</span>
+      {onResume && (
+        <button type="button" onClick={onResume}>
+          <Play size={22} />
+          Resume
+        </button>
+      )}
     </div>
   )
 }
@@ -1458,7 +1474,7 @@ function SpanishCard({
     <article
       className={`spanish-card ${compact ? 'compact' : ''} ${art ? 'image-card' : ''} ${card.suitColor}`}
       style={{
-        transform: stacked ? `translateX(${stacked * 24}px) rotate(${(stacked - 1) * 4}deg)` : undefined,
+        transform: stacked ? `translateX(${stacked * 34}px) rotate(${(stacked - 1) * 4}deg)` : undefined,
         animationDelay: `${Math.min(index, 12) * 35}ms`,
       }}
     >
