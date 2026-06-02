@@ -4,10 +4,12 @@ import { io, Socket } from 'socket.io-client'
 import {
   Bot,
   BookOpen,
+  CheckCircle2,
   Circle,
   Club,
   Crown,
   Eye,
+  Flag,
   Flame,
   Heart,
   Hourglass,
@@ -81,9 +83,14 @@ const emptyState: GameState = {
     topWinner: null,
   },
   skipNotice: null,
+  pileNotice: null,
+  endRoundVotes: 0,
+  endRoundVoteTarget: 0,
+  readyNextRoundCount: 0,
+  readyNextRoundTarget: 0,
   music: {
     title: 'Reggaeton Espanol',
-    embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk',
+    embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk?autoplay=1&list=RDkJQP7kiw5Fk',
     source: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk',
     updatedAt: 0,
   },
@@ -240,6 +247,7 @@ function HostScreen() {
           message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
         />
         <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
+        <PileNotice notice={state.pileNotice} selfId={state.selfId} />
         <div className="top-controls">
           <div className="table-stat">
             <UsersRound size={16} />
@@ -252,12 +260,23 @@ function HostScreen() {
             <small>pile</small>
           </div>
           <StatusPill connected={connected} />
+          {state.phase === 'playing' && (
+            <div className="round-pill">
+              Vote {state.endRoundVotes}/{state.endRoundVoteTarget}
+            </div>
+          )}
+          {state.phase === 'finished' && (
+            <div className="round-pill">
+              Ready {state.readyNextRoundCount}/{state.readyNextRoundTarget}
+            </div>
+          )}
           <div className="round-pill">Round {state.round || 'Lobby'}</div>
         </div>
         <div className="table-felt">
           <div className="felt-emblem" aria-hidden="true">
             EP
           </div>
+          {state.phase === 'finished' && <HostRoundResults players={state.players} readyCount={state.readyNextRoundCount} readyTarget={state.readyNextRoundTarget} />}
           <div className="turn-orbit">
             {state.players.map((player, index) => (
               <PlayerSeat
@@ -334,6 +353,8 @@ function PlayerScreen() {
   const isTurn = state.currentTurnId === state.selfId
   const selfPlayer = state.players.find((player) => player.id === state.selfId)
   const canChat = joined && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt)
+  const canVoteEndRound = joined && state.phase === 'playing' && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt) && !state.selfVotedEndRound
+  const canReadyNextRound = joined && state.phase === 'finished' && !state.selfSpectator && !state.selfReadyNextRound
   const requiredPlayCount = state.pile.length || 0
 
   const legalCardIds = useMemo(() => {
@@ -419,6 +440,18 @@ function PlayerScreen() {
     })
   }
 
+  const voteEndRound = () => {
+    socket.emit('voteEndRound', (reply: { ok: boolean; error?: string }) => {
+      setError(reply.ok ? '' : reply.error || 'Could not vote.')
+    })
+  }
+
+  const readyNextRound = () => {
+    socket.emit('readyNextRound', (reply: { ok: boolean; error?: string }) => {
+      setError(reply.ok ? '' : reply.error || 'Could not ready up.')
+    })
+  }
+
   if (!joined) {
     return (
       <main className="phone-shell join-phone">
@@ -469,6 +502,7 @@ function PlayerScreen() {
         message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
       />
       <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
+      <PileNotice notice={state.pileNotice} selfId={state.selfId} />
       <header className="phone-header">
         <div>
           <span>{state.selfSpectator ? `Watching ${state.roomCode}` : state.selfName}</span>
@@ -477,51 +511,83 @@ function PlayerScreen() {
         <div className="mini-timer">{seconds}s</div>
       </header>
 
-      <section className="phone-pile">
-        <span>Pile</span>
-        {state.pile.length ? (
-          <div className="mini-pile">{state.pile.map((card) => <SpanishCard key={card.id} card={card} compact />)}</div>
-        ) : (
-          <strong>Clear</strong>
-        )}
-      </section>
+      {state.phase === 'finished' && selfPlayer ? (
+        <PlayerRoundResult
+          player={selfPlayer}
+          ready={Boolean(state.selfReadyNextRound)}
+          readyCount={state.readyNextRoundCount}
+          readyTarget={state.readyNextRoundTarget}
+        />
+      ) : (
+        <>
+          <section className="phone-pile">
+            <span>Pile</span>
+            {state.pile.length ? (
+              <div className="mini-pile">{state.pile.map((card) => <SpanishCard key={card.id} card={card} compact />)}</div>
+            ) : (
+              <strong>Clear</strong>
+            )}
+          </section>
 
-      <section className="hand-grid" aria-label="Your cards">
-        {state.selfSpectator ? (
-          <div className="spectator-panel">
-            <Eye size={22} />
-            <strong>Watching this round</strong>
-            <span>You will join the next deal in room {state.roomCode}.</span>
-          </div>
-        ) : (
-          hand.map((card, index) => (
-            <button
-              key={card.id}
-              type="button"
-              className={`hand-card ${selected.includes(card.id) ? 'selected' : ''}`}
-              disabled={!isTurn || !selectableCardIds.has(card.id)}
-              onClick={() => toggleCard(card)}
-            >
-              <SpanishCard card={card} compact index={index} />
-            </button>
-          ))
-        )}
-      </section>
+          <section className="hand-grid" aria-label="Your cards">
+            {state.selfSpectator ? (
+              <div className="spectator-panel">
+                <Eye size={22} />
+                <strong>Watching this round</strong>
+                <span>You will join the next deal in room {state.roomCode}.</span>
+              </div>
+            ) : (
+              hand.map((card, index) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  className={`hand-card ${selected.includes(card.id) ? 'selected' : ''}`}
+                  disabled={!isTurn || !selectableCardIds.has(card.id)}
+                  onClick={() => toggleCard(card)}
+                >
+                  <SpanishCard card={card} compact index={index} />
+                </button>
+              ))
+            )}
+          </section>
+        </>
+      )}
       <PlayerMusicPanel music={state.music} />
       <ChatPanel messages={state.chat} canSend={canChat} />
 
-      <footer className="phone-actions">
+      <footer className={`phone-actions ${state.phase === 'finished' ? 'is-finished' : ''}`}>
         <div className="selection-meter">
           <Sparkles size={16} />
-          <span>{selected.length ? `${selected.length} selected` : isTurn ? 'Choose cards' : 'Waiting'}</span>
+          <span>
+            {state.phase === 'finished'
+              ? `${state.readyNextRoundCount}/${state.readyNextRoundTarget} ready`
+              : selected.length
+                ? `${selected.length} selected`
+                : isTurn
+                  ? 'Choose cards'
+                  : 'Waiting'}
+          </span>
         </div>
-        <button type="button" onClick={playSelected} disabled={state.selfSpectator || !isTurn || !canPlaySelected}>
-          <Play size={18} />
-          Play cards
-        </button>
-        <button type="button" className="secondary" onClick={passTurn} disabled={state.selfSpectator || !isTurn}>
-          Pass
-        </button>
+        {state.phase === 'finished' ? (
+          <button type="button" onClick={readyNextRound} disabled={!canReadyNextRound}>
+            <CheckCircle2 size={18} />
+            {state.selfReadyNextRound ? 'Ready' : 'Ready up'}
+          </button>
+        ) : (
+          <>
+            <button type="button" onClick={playSelected} disabled={state.selfSpectator || !isTurn || !canPlaySelected}>
+              <Play size={18} />
+              Play cards
+            </button>
+            <button type="button" className="secondary" onClick={passTurn} disabled={state.selfSpectator || !isTurn}>
+              Pass
+            </button>
+            <button type="button" className="secondary vote-action" onClick={voteEndRound} disabled={!canVoteEndRound}>
+              <Flag size={18} />
+              {state.selfVotedEndRound ? 'Voted' : `${state.endRoundVotes}/${state.endRoundVoteTarget}`}
+            </button>
+          </>
+        )}
         <button type="button" className="secondary" onClick={() => setRulesOpen(true)}>
           <BookOpen size={18} />
           Rules
@@ -559,17 +625,60 @@ function SkipNotice({
   )
 }
 
+function PileNotice({
+  notice,
+  selfId,
+}: {
+  notice: GameState['pileNotice']
+  selfId?: string | null
+}) {
+  const [hiddenNoticeKey, setHiddenNoticeKey] = useState('')
+  const noticeKey = notice ? `${notice.playerId || 'pile'}-${notice.announcedAt}` : ''
+
+  useEffect(() => {
+    if (!noticeKey) return
+    const timeout = window.setTimeout(() => setHiddenNoticeKey(noticeKey), 3500)
+    return () => window.clearTimeout(timeout)
+  }, [noticeKey])
+
+  if (!notice || hiddenNoticeKey === noticeKey) return null
+  const isSelf = notice.playerId === selfId
+  const message = isSelf ? 'Pile cleared. You start.' : notice.message
+  return (
+    <div className={`pile-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
+      <Layers3 size={18} />
+      <span>{message}</span>
+    </div>
+  )
+}
+
 function YouTubeFrame({ music }: { music: GameState['music'] }) {
+  const embedUrl = continuousYouTubeUrl(music.embedUrl)
   return (
     <iframe
       className="youtube-frame"
-      src={music.embedUrl}
+      src={embedUrl}
       title={`YouTube music: ${music.title}`}
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
       referrerPolicy="strict-origin-when-cross-origin"
       allowFullScreen
     />
   )
+}
+
+function continuousYouTubeUrl(embedUrl: string) {
+  try {
+    const url = new URL(embedUrl)
+    url.searchParams.set('autoplay', '1')
+    if (url.pathname.includes('/embed/videoseries')) return url.toString()
+    const videoId = url.pathname.split('/').filter(Boolean).at(-1)
+    if (videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId) && !url.searchParams.has('list')) {
+      url.searchParams.set('list', `RD${videoId}`)
+    }
+    return url.toString()
+  } catch {
+    return embedUrl
+  }
 }
 
 function HostMusicPanel({ music }: { music: GameState['music'] }) {
@@ -765,6 +874,86 @@ function Scoreboard({
   )
 }
 
+function HostRoundResults({
+  players,
+  readyCount,
+  readyTarget,
+}: {
+  players: Player[]
+  readyCount: number
+  readyTarget: number
+}) {
+  const president = players.find((player) => player.role === 'president')
+  const fool = players.find((player) => player.role === 'fool')
+  const neutrals = players.filter((player) => player.role === 'neutral')
+
+  return (
+    <section className="host-round-results" aria-live="polite">
+      <div className="results-heading">
+        <Trophy size={30} />
+        <span>Round Results</span>
+      </div>
+      <div className="result-spotlight">
+        <ResultRoleCard title="President" player={president} role="president" />
+        <ResultRoleCard title="Neutral" playerNames={neutrals.map((player) => player.name)} role="neutral" />
+        <ResultRoleCard title="Fool" player={fool} role="fool" />
+      </div>
+      <div className="ready-meter">
+        <CheckCircle2 size={18} />
+        <span>
+          {readyCount}/{readyTarget} ready for next round
+        </span>
+      </div>
+    </section>
+  )
+}
+
+function ResultRoleCard({
+  title,
+  player,
+  playerNames,
+  role,
+}: {
+  title: string
+  player?: Player
+  playerNames?: string[]
+  role: PlayerRole
+}) {
+  const names = player ? [player.name] : playerNames || []
+  return (
+    <div className={`result-role-card role-${role}`}>
+      <RoleIcon role={role} size={32} />
+      <span>{title}</span>
+      <strong>{names.length ? names.join(', ') : 'None'}</strong>
+    </div>
+  )
+}
+
+function PlayerRoundResult({
+  player,
+  ready,
+  readyCount,
+  readyTarget,
+}: {
+  player: Player
+  ready: boolean
+  readyCount: number
+  readyTarget: number
+}) {
+  return (
+    <section className={`player-round-result role-${player.role}`} aria-live="polite">
+      <RoleIcon role={player.role} size={42} />
+      <span>Round result</span>
+      <h2>{roleLabel(player.role)}</h2>
+      <p>{resultMessage(player.role)}</p>
+      <div className="ready-meter">
+        <CheckCircle2 size={18} />
+        <strong>{ready ? 'You are ready' : `${readyCount}/${readyTarget} players ready`}</strong>
+      </div>
+    </section>
+  )
+}
+
 function TurnAnnouncement({ message }: { message: string }) {
   if (!message) return null
   return (
@@ -909,16 +1098,28 @@ function PlayerGlyph({ icon }: { icon: PlayerIcon }) {
 function RoleBadge({ role = 'neutral' }: { role?: PlayerRole }) {
   return (
     <span className={`role-badge role-${role}`} title={roleLabel(role)}>
-      {role === 'president' ? <Crown size={13} /> : role === 'fool' ? <Sparkles size={13} /> : <Circle size={13} />}
+      <RoleIcon role={role} size={13} />
       {roleLabel(role)}
     </span>
   )
+}
+
+function RoleIcon({ role = 'neutral', size = 16 }: { role?: PlayerRole; size?: number }) {
+  if (role === 'president') return <Crown size={size} />
+  if (role === 'fool') return <Sparkles size={size} />
+  return <Circle size={size} />
 }
 
 function roleLabel(role: PlayerRole = 'neutral') {
   if (role === 'president') return 'President'
   if (role === 'fool') return 'Fool'
   return 'Neutral'
+}
+
+function resultMessage(role: PlayerRole = 'neutral') {
+  if (role === 'president') return 'You finished first. Lead the room with style.'
+  if (role === 'fool') return 'You finished last this round. Shake it off and get ready.'
+  return 'You landed in the middle. Solid table survival.'
 }
 
 function RulesModal({ open, onClose }: { open: boolean; onClose: () => void }) {

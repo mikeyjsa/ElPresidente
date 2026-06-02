@@ -18,7 +18,7 @@ const CHAT_LIMIT = 40
 const ROOM_CODE_LENGTH = 5
 const DEFAULT_MUSIC = {
   title: 'Reggaeton Espanol',
-  embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk',
+  embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk?autoplay=1&list=RDkJQP7kiw5Fk',
   source: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk',
 }
 const PLAYER_ICONS = ['crown', 'sparkles', 'flame', 'heart', 'shield', 'club', 'star', 'sun', 'bolt', 'diamond', 'moon', 'gem']
@@ -118,6 +118,9 @@ function createRoomState(code) {
     winners: score.winners || {},
     recentWinners: score.recentWinners || [],
     skipNotice: null,
+    pileNotice: null,
+    endRoundVotes: [],
+    readyNextRoundIds: [],
     music: {
       ...DEFAULT_MUSIC,
       updatedAt: Date.now(),
@@ -248,6 +251,10 @@ function scoreSummary() {
 
 function tableState() {
   const currentPlayer = state.players.find((p) => p.id === state.currentTurnId)
+  const endRoundVoters = state.players.filter(
+    (player) => !player.isComputer && !player.isSpectator && player.connected && !player.finishedAt,
+  )
+  const activeEndRoundVotes = state.endRoundVotes.filter((playerId) => endRoundVoters.some((player) => player.id === playerId))
   return {
     roomCode: state.code,
     phase: state.phase,
@@ -264,6 +271,11 @@ function tableState() {
     recentWinners: state.recentWinners,
     scoreSummary: scoreSummary(),
     skipNotice: state.skipNotice,
+    pileNotice: state.pileNotice,
+    endRoundVotes: activeEndRoundVotes.length,
+    endRoundVoteTarget: Math.max(1, Math.floor(endRoundVoters.length / 2) + 1),
+    readyNextRoundCount: state.readyNextRoundIds.filter((playerId) => humanPlayers().some((player) => player.id === playerId)).length,
+    readyNextRoundTarget: humanPlayers().length,
     music: state.music,
     chat: state.chat.slice(-CHAT_LIMIT),
     log: state.log.slice(-8).reverse(),
@@ -277,6 +289,8 @@ function playerState(player) {
     selfId: player?.id || null,
     selfName: player?.name || '',
     selfSpectator: Boolean(player?.isSpectator),
+    selfVotedEndRound: Boolean(player && state.endRoundVotes.includes(player.id)),
+    selfReadyNextRound: Boolean(player && state.readyNextRoundIds.includes(player.id)),
     hand: player && !player.isSpectator ? sortHand(player.hand) : [],
   }
 }
@@ -287,6 +301,10 @@ function activePlayers() {
 
 function humanPlayers() {
   return state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected)
+}
+
+function endRoundVotingPlayers() {
+  return state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected && !player.finishedAt)
 }
 
 function playerIdentity(rawIdentity = {}) {
@@ -303,7 +321,7 @@ function youtubeEmbedFromInput(rawInput) {
   const directId = source.match(/^[a-zA-Z0-9_-]{11}$/)?.[0]
   if (directId) {
     return {
-      embedUrl: `https://www.youtube.com/embed/${directId}`,
+      embedUrl: `https://www.youtube.com/embed/${directId}?autoplay=1&list=RD${directId}`,
       source: `https://www.youtube.com/watch?v=${directId}`,
     }
   }
@@ -314,7 +332,7 @@ function youtubeEmbedFromInput(rawInput) {
     const playlistId = url.searchParams.get('list')
     if (playlistId && /^[a-zA-Z0-9_-]+$/.test(playlistId)) {
       return {
-        embedUrl: `https://www.youtube.com/embed/videoseries?list=${playlistId}`,
+        embedUrl: `https://www.youtube.com/embed/videoseries?autoplay=1&list=${playlistId}`,
         source,
       }
     }
@@ -330,7 +348,7 @@ function youtubeEmbedFromInput(rawInput) {
     }
     if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return null
     return {
-      embedUrl: `https://www.youtube.com/embed/${videoId}`,
+      embedUrl: `https://www.youtube.com/embed/${videoId}?autoplay=1&list=RD${videoId}`,
       source,
     }
   } catch {
@@ -404,6 +422,18 @@ function clearPile(reason) {
   state.passCount = 0
 }
 
+function announcePileLead(player, reason = 'Pile cleared') {
+  if (!player || state.phase !== 'playing') return
+  const message = `${reason}. ${player.name} starts.`
+  state.pileNotice = {
+    message,
+    playerId: player.id,
+    playerName: player.name,
+    announcedAt: Date.now(),
+  }
+  state.log.push(message)
+}
+
 function legalCardsFor(player) {
   if (!state.pile.length) return sortHand(player.hand)
   const topStrength = state.pile[0].strength
@@ -435,15 +465,19 @@ function playCards(player, cards) {
   state.pile = cards
   state.pileOwnerId = player.id
   state.passCount = 0
+  state.pileNotice = null
   state.log.push(`${player.name} played ${cards.map((card) => `${card.rankLabel} of ${card.suitName}`).join(', ')}.`)
-  if (closesPile) clearPile(`${player.name} closed the pile with the 2 of Coins and leads again.`)
+  if (closesPile) {
+    clearPile(`${player.name} closed the pile with the 2 of Coins and leads again.`)
+    if (player.hand.length) announcePileLead(player, 'Pile cleared')
+  }
   if (!player.hand.length) {
     player.finishedAt = state.finishOrder.length + 1
     state.finishOrder.push(player.name)
     state.log.push(`${player.name} went out in position ${player.finishedAt}.`)
     clearPile('Pile cleared after a player went out.')
   }
-  return { closesPile, skipNext }
+  return { closesPile, skipNext, wentOut: Boolean(player.finishedAt) }
 }
 
 function passPlayer(player, reason = 'passed') {
@@ -456,14 +490,16 @@ function passPlayer(player, reason = 'passed') {
     if (pileOwner) {
       state.currentTurnId = pileOwner.id
       state.turnStartedAt = Date.now()
+      announcePileLead(pileOwner, 'Pile cleared')
       return { closed: true }
     }
   }
   return { closed: false }
 }
 
-function endRound() {
+function endRound(reason = '') {
   if (state.phase !== 'playing') return
+  if (reason) state.log.push(reason)
   const remaining = activePlayers()
   for (const player of remaining) {
     if (!state.finishOrder.includes(player.name)) state.finishOrder.push(player.name)
@@ -492,6 +528,9 @@ function endRound() {
   state.phase = 'finished'
   state.currentTurnId = null
   state.turnStartedAt = null
+  state.pileNotice = null
+  state.endRoundVotes = []
+  state.readyNextRoundIds = []
   state.players.forEach((player) => {
     if (player.isSpectator && player.connected) player.isSpectator = false
   })
@@ -511,8 +550,12 @@ function dealRound() {
   state.pile = []
   state.pileOwnerId = null
   state.skipNotice = null
+  state.pileNotice = null
+  state.endRoundVotes = []
+  state.readyNextRoundIds = []
   state.passCount = 0
   state.finishOrder = []
+  state.players = shuffle(state.players)
   state.players.forEach((player) => {
     player.hand = []
     player.finishedAt = null
@@ -526,6 +569,7 @@ function dealRound() {
   state.currentTurnId = state.players[0]?.id || null
   state.turnStartedAt = Date.now()
   state.log.push(`Round ${state.round} started. ${state.players[0]?.name || 'First player'} leads.`)
+  state.log.push(`Play order: ${state.players.map((player) => player.name).join(', ')}.`)
 }
 
 function emitAll() {
@@ -562,9 +606,9 @@ function takeComputerTurn(playerId) {
   const [cards] = legalCardGroupsFor(player)
   let skipNextPlay = false
   if (cards) {
-    const { closesPile, skipNext } = playCards(player, cards)
-    skipNextPlay = skipNext
-    if (closesPile && !player.finishedAt) {
+    const result = playCards(player, cards)
+    skipNextPlay = result.skipNext
+    if (result.closesPile && !player.finishedAt) {
       state.currentTurnId = player.id
       state.turnStartedAt = Date.now()
       emitAll()
@@ -577,7 +621,11 @@ function takeComputerTurn(playerId) {
       return
     }
   }
+  const resultWentOut = cards ? Boolean(player.finishedAt) : false
   nextTurn(player.id, skipNextPlay)
+  if (resultWentOut && state.phase === 'playing') {
+    announcePileLead(state.players.find((item) => item.id === state.currentTurnId), 'Pile cleared')
+  }
   emitAll()
 }
 
@@ -673,6 +721,9 @@ io.on('connection', (socket) => {
     state.pile = []
     state.pileOwnerId = null
     state.skipNotice = null
+    state.pileNotice = null
+    state.endRoundVotes = []
+    state.readyNextRoundIds = []
     state.currentTurnId = null
     state.turnStartedAt = null
     state.passCount = 0
@@ -721,7 +772,45 @@ io.on('connection', (socket) => {
       state.turnStartedAt = Date.now()
     } else {
       nextTurn(player.id, result.skipNext)
+      if (result.wentOut && state.phase === 'playing') {
+        announcePileLead(state.players.find((item) => item.id === state.currentTurnId), 'Pile cleared')
+      }
     }
+    emitAll()
+  })
+
+  socket.on('voteEndRound', (reply) => {
+    setRoomFromSocket(socket)
+    const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (!player || player.isSpectator || player.finishedAt || state.phase !== 'playing') {
+      reply?.({ ok: false, error: 'Only active players can vote.' })
+      return
+    }
+    if (!state.endRoundVotes.includes(player.id)) state.endRoundVotes.push(player.id)
+    const voters = endRoundVotingPlayers()
+    const target = Math.max(1, Math.floor(voters.length / 2) + 1)
+    state.endRoundVotes = state.endRoundVotes.filter((playerId) => voters.some((voter) => voter.id === playerId))
+    state.log.push(`${player.name} voted to end the round (${state.endRoundVotes.length}/${target}).`)
+    if (state.endRoundVotes.length >= target) endRound('Round ended early by vote.')
+    reply?.({ ok: true })
+    emitAll()
+  })
+
+  socket.on('readyNextRound', (reply) => {
+    setRoomFromSocket(socket)
+    const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (!player || player.isSpectator || state.phase !== 'finished') {
+      reply?.({ ok: false, error: 'Wait for the round to finish.' })
+      return
+    }
+    if (!state.readyNextRoundIds.includes(player.id)) state.readyNextRoundIds.push(player.id)
+    const readyPlayers = humanPlayers()
+    state.readyNextRoundIds = state.readyNextRoundIds.filter((playerId) => readyPlayers.some((readyPlayer) => readyPlayer.id === playerId))
+    state.log.push(`${player.name} is ready for the next round (${state.readyNextRoundIds.length}/${readyPlayers.length}).`)
+    if (readyPlayers.length >= MIN_HUMANS_WITH_COMPUTER && state.readyNextRoundIds.length >= readyPlayers.length) {
+      dealRound()
+    }
+    reply?.({ ok: true })
     emitAll()
   })
 
@@ -790,6 +879,8 @@ io.on('connection', (socket) => {
     const player = state.players.find((item) => item.id === socket.id)
     if (player) {
       player.connected = false
+      state.endRoundVotes = state.endRoundVotes.filter((playerId) => playerId !== player.id)
+      state.readyNextRoundIds = state.readyNextRoundIds.filter((playerId) => playerId !== player.id)
       state.log.push(`${player.name} disconnected.`)
       emitAll()
     }

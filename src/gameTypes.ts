@@ -71,6 +71,13 @@ export type SkipNotice = {
   skippedAt: number
 } | null
 
+export type PileNotice = {
+  message: string
+  playerId: string | null
+  playerName: string
+  announcedAt: number
+} | null
+
 export type RoomMusic = {
   title: string
   embedUrl: string
@@ -94,6 +101,11 @@ export type GameState = {
   recentWinners: RecentWinner[]
   scoreSummary: ScoreSummary
   skipNotice: SkipNotice
+  pileNotice: PileNotice
+  endRoundVotes: number
+  endRoundVoteTarget: number
+  readyNextRoundCount: number
+  readyNextRoundTarget: number
   music: RoomMusic
   chat: ChatMessage[]
   log: string[]
@@ -101,5 +113,7 @@ export type GameState = {
   selfId?: string | null
   selfName?: string
   selfSpectator?: boolean
+  selfVotedEndRound?: boolean
+  selfReadyNextRound?: boolean
   hand?: Card[]
 }
