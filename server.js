@@ -537,7 +537,7 @@ function endRound(reason = '') {
   state.log.push(`${winner || 'Nobody'} is El Presidente.`)
 }
 
-function dealRound() {
+function dealRound({ randomizeOrder = false } = {}) {
   state.players = state.players.filter((player) => player.isComputer || player.connected)
   state.players.forEach((player) => {
     player.isSpectator = false
@@ -555,7 +555,7 @@ function dealRound() {
   state.readyNextRoundIds = []
   state.passCount = 0
   state.finishOrder = []
-  state.players = shuffle(state.players)
+  if (randomizeOrder) state.players = shuffle(state.players)
   state.players.forEach((player) => {
     player.hand = []
     player.finishedAt = null
@@ -705,7 +705,7 @@ io.on('connection', (socket) => {
       reply?.({ ok: false, error: 'At least two players need to join.' })
       return
     }
-    dealRound()
+    dealRound({ randomizeOrder: state.phase === 'lobby' })
     reply?.({ ok: true })
     emitAll()
   })
