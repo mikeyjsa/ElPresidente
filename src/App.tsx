@@ -18,6 +18,7 @@ import {
   MessageCircle,
   Minimize2,
   Music,
+  Pause,
   Play,
   RefreshCw,
   Send,
@@ -27,6 +28,7 @@ import {
   Star,
   Sun,
   Trophy,
+  UserX,
   UserRound,
   UsersRound,
   Wifi,
@@ -39,6 +41,9 @@ const socketUrl = import.meta.env.DEV ? `${window.location.protocol}//${window.l
 const socket: Socket = io(socketUrl)
 const minimumPlayers = 3
 const minimumHumansWithComputer = 2
+const cardRanks = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2]
+const cardSuits = ['oros', 'copas', 'espadas', 'bastos']
+const cardAssetPaths = cardRanks.flatMap((rank) => cardSuits.map((suit) => `/assets/cards/${rank}-${suit}.png`))
 const playerIcons: Array<{ id: PlayerIcon; label: string }> = [
   { id: 'crown', label: 'Royal' },
   { id: 'sparkles', label: 'Magic' },
@@ -74,6 +79,8 @@ const emptyState: GameState = {
   currentPlayerName: null,
   turnStartedAt: null,
   turnSeconds: 30,
+  paused: false,
+  pausedAt: null,
   passCount: 0,
   finishOrder: [],
   round: 0,
@@ -84,10 +91,13 @@ const emptyState: GameState = {
   },
   skipNotice: null,
   pileNotice: null,
+  exchange: null,
   endRoundVotes: 0,
   endRoundVoteTarget: 0,
   readyNextRoundCount: 0,
   readyNextRoundTarget: 0,
+  playerActivities: [],
+  pendingRejoins: [],
   music: {
     title: 'Reggaeton Espanol',
     embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk?autoplay=1&list=RDkJQP7kiw5Fk',
@@ -104,8 +114,46 @@ function isPileCloser(card: Card) {
 }
 
 function App() {
+  const cardAssetsReady = useCardAssetsReady()
   const isPhone = window.location.pathname.startsWith('/join')
+  if (!cardAssetsReady) return <CardPreloadScreen />
   return isPhone ? <PlayerScreen /> : <HostScreen />
+}
+
+function useCardAssetsReady() {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(
+      cardAssetPaths.map(
+        (src) =>
+          new Promise<void>((resolve) => {
+            const image = new Image()
+            image.onload = () => resolve()
+            image.onerror = () => resolve()
+            image.src = src
+          }),
+      ),
+    ).then(() => {
+      if (!cancelled) setReady(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return ready
+}
+
+function CardPreloadScreen() {
+  return (
+    <main className="asset-preload-screen">
+      <span className="brand-mark">EP</span>
+      <h1>Loading cards</h1>
+      <p>Preparing the table before the timer starts.</p>
+    </main>
+  )
 }
 
 function roomCodeFromUrl() {
@@ -152,7 +200,8 @@ function useCountdown(state: GameState) {
   }, [])
 
   if (!state.turnStartedAt || state.phase !== 'playing') return state.turnSeconds
-  return Math.min(state.turnSeconds, Math.max(0, Math.ceil(state.turnSeconds - (now - state.turnStartedAt) / 1000)))
+  const effectiveNow = state.paused ? state.pausedAt || now : now
+  return Math.min(state.turnSeconds, Math.max(0, Math.ceil(state.turnSeconds - (effectiveNow - state.turnStartedAt) / 1000)))
 }
 
 function HostScreen() {
@@ -163,7 +212,7 @@ function HostScreen() {
   const [isFullscreen, setIsFullscreen] = useState(() => Boolean(document.fullscreenElement))
   const seconds = useCountdown(state)
   const humanPlayers = state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected)
-  const canStart = humanPlayers.length >= minimumHumansWithComputer && state.phase !== 'playing'
+  const canStart = humanPlayers.length >= minimumHumansWithComputer && state.phase !== 'playing' && state.phase !== 'exchange'
 
   useEffect(() => {
     QRCode.toDataURL(state.joinUrl, {
@@ -181,6 +230,10 @@ function HostScreen() {
 
   const startGame = () => socket.emit('startGame', () => undefined)
   const resetLobby = () => socket.emit('resetLobby')
+  const togglePause = () => socket.emit('setPaused', !state.paused, () => undefined)
+  const kickPlayer = (playerId: string) => socket.emit('kickPlayer', playerId, () => undefined)
+  const approveRejoin = (requestId: string) => socket.emit('approveRejoin', requestId, () => undefined)
+  const declineRejoin = (requestId: string) => socket.emit('declineRejoin', requestId, () => undefined)
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
       document.exitFullscreen()
@@ -209,6 +262,7 @@ function HostScreen() {
           <span>Scan or enter the room code to join</span>
           <p>{state.joinUrl}</p>
         </div>
+        {state.pendingRejoins.length > 0 && <PendingRejoinPanel requests={state.pendingRejoins} onApprove={approveRejoin} onDecline={declineRejoin} />}
         <HostMusicPanel music={state.music} />
         <div className="host-actions">
           <button type="button" onClick={startGame} disabled={!canStart}>
@@ -218,6 +272,10 @@ function HostScreen() {
           <button type="button" className="secondary" onClick={resetLobby}>
             <RefreshCw size={18} />
             Reset
+          </button>
+          <button type="button" className="secondary" onClick={togglePause} disabled={state.phase === 'lobby' || state.phase === 'finished'}>
+            {state.paused ? <Play size={18} /> : <Pause size={18} />}
+            {state.paused ? 'Resume' : 'Pause'}
           </button>
           <button type="button" className="secondary" onClick={() => setRulesOpen(true)}>
             <BookOpen size={18} />
@@ -246,6 +304,7 @@ function HostScreen() {
           key={state.currentTurnId || 'no-turn'}
           message={state.phase === 'playing' && state.currentPlayerName ? `${state.currentPlayerName}'s turn` : ''}
         />
+        {state.paused && <PauseOverlay />}
         <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
         <PileNotice notice={state.pileNotice} selfId={state.selfId} />
         <div className="top-controls">
@@ -270,6 +329,7 @@ function HostScreen() {
               Ready {state.readyNextRoundCount}/{state.readyNextRoundTarget}
             </div>
           )}
+          {state.phase === 'exchange' && <div className="round-pill">Card exchange</div>}
           <div className="round-pill">Round {state.round || 'Lobby'}</div>
         </div>
         <div className="table-felt">
@@ -277,6 +337,7 @@ function HostScreen() {
             EP
           </div>
           {state.phase === 'finished' && <HostRoundResults players={state.players} readyCount={state.readyNextRoundCount} readyTarget={state.readyNextRoundTarget} />}
+          {state.phase === 'exchange' && state.exchange && <HostExchangePanel exchange={state.exchange} />}
           <div className="turn-orbit">
             {state.players.map((player, index) => (
               <PlayerSeat
@@ -285,6 +346,8 @@ function HostScreen() {
                 index={index}
                 total={Math.max(state.players.length, 1)}
                 active={state.currentTurnId === player.id}
+                activity={state.playerActivities.find((activity) => activity.playerId === player.id)}
+                onKick={!player.isComputer ? () => kickPlayer(player.id) : undefined}
               />
             ))}
           </div>
@@ -345,6 +408,7 @@ function PlayerScreen() {
   const [icon, setIcon] = useState<PlayerIcon>('star')
   const [color, setColor] = useState<PlayerColor>('gold')
   const [joined, setJoined] = useState(false)
+  const [joinPending, setJoinPending] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   const [error, setError] = useState('')
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -353,8 +417,13 @@ function PlayerScreen() {
   const isTurn = state.currentTurnId === state.selfId
   const selfPlayer = state.players.find((player) => player.id === state.selfId)
   const canChat = joined && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt)
-  const canVoteEndRound = joined && state.phase === 'playing' && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt) && !state.selfVotedEndRound
-  const canReadyNextRound = joined && state.phase === 'finished' && !state.selfSpectator && !state.selfReadyNextRound
+  const canVoteEndRound = joined && !state.paused && state.phase === 'playing' && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt) && !state.selfVotedEndRound
+  const canReadyNextRound = joined && !state.paused && state.phase === 'finished' && !state.selfSpectator && !state.selfReadyNextRound
+  const exchangeRole = state.exchange?.presidentId === state.selfId ? 'president' : state.exchange?.foolId === state.selfId ? 'fool' : null
+  const exchangeCard = useMemo(() => {
+    if (!exchangeRole) return null
+    return exchangeRole === 'president' ? weakestHandCard(hand) : strongestHandCard(hand)
+  }, [exchangeRole, hand])
   const requiredPlayCount = state.pile.length || 0
 
   const legalCardIds = useMemo(() => {
@@ -389,16 +458,27 @@ function PlayerScreen() {
       return
     }
     setRequestedRoomCode(nextRoomCode)
-    socket.emit('join', { name, icon, color, roomCode: nextRoomCode }, (reply: { ok: boolean; error?: string; roomCode?: string }) => {
+    setJoinPending(false)
+    socket.emit('join', { name, icon, color, roomCode: nextRoomCode }, (reply: { ok: boolean; pending?: boolean; error?: string; roomCode?: string }) => {
       if (reply.ok) {
         setJoined(true)
+        setJoinPending(false)
         if (reply.roomCode) {
           setRoomCode(reply.roomCode)
           setRequestedRoomCode(reply.roomCode)
           window.history.replaceState(null, '', `/join?room=${reply.roomCode}`)
         }
         setError('')
+      } else if (reply.pending) {
+        setJoinPending(true)
+        if (reply.roomCode) {
+          setRoomCode(reply.roomCode)
+          setRequestedRoomCode(reply.roomCode)
+          window.history.replaceState(null, '', `/join?room=${reply.roomCode}`)
+        }
+        setError(reply.error || 'Waiting for host approval.')
       } else {
+        setJoinPending(false)
         setError(reply.error || 'Could not join.')
       }
     })
@@ -407,19 +487,41 @@ function PlayerScreen() {
   useEffect(() => {
     const onLobbyReset = () => {
       setJoined(false)
+      setJoinPending(false)
       setName('')
       setSelected([])
       setError('')
     }
+    const onRejoinApproved = (payload: { roomCode?: string }) => {
+      setJoined(true)
+      setJoinPending(false)
+      setSelected([])
+      setError('')
+      if (payload.roomCode) {
+        setRoomCode(payload.roomCode)
+        setRequestedRoomCode(payload.roomCode)
+        window.history.replaceState(null, '', `/join?room=${payload.roomCode}`)
+      }
+    }
+    const onRejoinDeclined = () => {
+      setJoined(false)
+      setJoinPending(false)
+      setError('Host declined the rejoin request.')
+    }
 
     socket.on('lobbyReset', onLobbyReset)
+    socket.on('rejoinApproved', onRejoinApproved)
+    socket.on('rejoinDeclined', onRejoinDeclined)
     return () => {
       socket.off('lobbyReset', onLobbyReset)
+      socket.off('rejoinApproved', onRejoinApproved)
+      socket.off('rejoinDeclined', onRejoinDeclined)
     }
   }, [])
 
   const toggleCard = (card: Card) => {
     if (!isTurn || !selectableCardIds.has(card.id)) return
+    socket.emit('playerActivity', 'selecting')
     setSelected((current) => (current.includes(card.id) ? current.filter((id) => id !== card.id) : [...current, card.id]))
   }
 
@@ -452,41 +554,65 @@ function PlayerScreen() {
     })
   }
 
+  const exchangeSelectedCard = (card: Card) => {
+    socket.emit('playerActivity', 'exchanging')
+    socket.emit('exchangeCard', card.id, (reply: { ok: boolean; error?: string }) => {
+      setError(reply.ok ? '' : reply.error || 'Could not exchange that card.')
+    })
+  }
+
+  useEffect(() => {
+    if (isTurn && state.phase === 'playing' && !state.paused) socket.emit('playerActivity', 'thinking')
+  }, [isTurn, state.phase, state.paused, state.currentTurnId])
+
   if (!joined) {
     return (
       <main className="phone-shell join-phone">
         <div className="phone-card">
           <span className="brand-mark">EP</span>
-          <h1>Join El Presidente</h1>
-          <form onSubmit={join}>
-            <label htmlFor="playerName">Your name</label>
-            <input
-              id="playerName"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={20}
-              autoComplete="name"
-              autoFocus
-            />
-            <label htmlFor="roomCode">Room code</label>
-            <input
-              id="roomCode"
-              value={roomCode}
-              onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
-              maxLength={12}
-              autoComplete="off"
-              placeholder="Enter code from the table"
-            />
-            <IdentityPicker icon={icon} color={color} onIconChange={setIcon} onColorChange={setColor} />
-            <button type="submit">
-              <Send size={18} />
-              Join table
-            </button>
-            <button type="button" className="secondary" onClick={() => setRulesOpen(true)}>
-              <BookOpen size={18} />
-              Rules
-            </button>
-          </form>
+          {joinPending ? (
+            <section className="rejoin-waiting" aria-live="polite">
+              <Hourglass size={38} />
+              <h1>Waiting for host</h1>
+              <p>{name || 'Your seat'} is asking to rejoin room {roomCode || requestedRoomCode}.</p>
+              <button type="button" className="secondary" onClick={() => setJoinPending(false)}>
+                Change details
+              </button>
+            </section>
+          ) : (
+            <>
+              <h1>Join El Presidente</h1>
+              <form onSubmit={join}>
+                <label htmlFor="playerName">Your name</label>
+                <input
+                  id="playerName"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  maxLength={20}
+                  autoComplete="name"
+                  autoFocus
+                />
+                <label htmlFor="roomCode">Room code</label>
+                <input
+                  id="roomCode"
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+                  maxLength={12}
+                  autoComplete="off"
+                  placeholder="Enter code from the table"
+                />
+                <IdentityPicker icon={icon} color={color} onIconChange={setIcon} onColorChange={setColor} />
+                <button type="submit">
+                  <Send size={18} />
+                  Join table
+                </button>
+                <button type="button" className="secondary" onClick={() => setRulesOpen(true)}>
+                  <BookOpen size={18} />
+                  Rules
+                </button>
+              </form>
+            </>
+          )}
           {error && <p className="error-text">{error}</p>}
           <StatusPill connected={connected} />
         </div>
@@ -503,6 +629,7 @@ function PlayerScreen() {
       />
       <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
       <PileNotice notice={state.pileNotice} selfId={state.selfId} />
+      {state.paused && <PauseOverlay />}
       <header className="phone-header">
         <div>
           <span>{state.selfSpectator ? `Watching ${state.roomCode}` : state.selfName}</span>
@@ -517,6 +644,14 @@ function PlayerScreen() {
           ready={Boolean(state.selfReadyNextRound)}
           readyCount={state.readyNextRoundCount}
           readyTarget={state.readyNextRoundTarget}
+        />
+      ) : state.phase === 'exchange' ? (
+        <PlayerExchangePanel
+          exchange={state.exchange}
+          exchangeRole={exchangeRole}
+          hand={hand}
+          requiredCardId={exchangeCard?.id || null}
+          onSelect={exchangeSelectedCard}
         />
       ) : (
         <>
@@ -542,7 +677,7 @@ function PlayerScreen() {
                   key={card.id}
                   type="button"
                   className={`hand-card ${selected.includes(card.id) ? 'selected' : ''}`}
-                  disabled={!isTurn || !selectableCardIds.has(card.id)}
+                  disabled={state.paused || !isTurn || !selectableCardIds.has(card.id)}
                   onClick={() => toggleCard(card)}
                 >
                   <SpanishCard card={card} compact index={index} />
@@ -553,13 +688,17 @@ function PlayerScreen() {
         </>
       )}
       <PlayerMusicPanel music={state.music} />
-      <ChatPanel messages={state.chat} canSend={canChat} />
+      <ChatPanel messages={state.chat} canSend={canChat} onTyping={() => socket.emit('playerActivity', 'typing')} />
 
-      <footer className={`phone-actions ${state.phase === 'finished' ? 'is-finished' : ''}`}>
+      <footer className={`phone-actions ${state.phase === 'finished' || state.phase === 'exchange' ? 'is-finished' : ''}`}>
         <div className="selection-meter">
           <Sparkles size={16} />
           <span>
-            {state.phase === 'finished'
+            {state.phase === 'exchange'
+              ? exchangeRole
+                ? 'Choose exchange card'
+                : 'Exchange in progress'
+              : state.phase === 'finished'
               ? `${state.readyNextRoundCount}/${state.readyNextRoundTarget} ready`
               : selected.length
                 ? `${selected.length} selected`
@@ -573,13 +712,18 @@ function PlayerScreen() {
             <CheckCircle2 size={18} />
             {state.selfReadyNextRound ? 'Ready' : 'Ready up'}
           </button>
+        ) : state.phase === 'exchange' ? (
+          <button type="button" disabled>
+            <Layers3 size={18} />
+            Exchange
+          </button>
         ) : (
           <>
-            <button type="button" onClick={playSelected} disabled={state.selfSpectator || !isTurn || !canPlaySelected}>
+            <button type="button" onClick={playSelected} disabled={state.paused || state.selfSpectator || !isTurn || !canPlaySelected}>
               <Play size={18} />
               Play cards
             </button>
-            <button type="button" className="secondary" onClick={passTurn} disabled={state.selfSpectator || !isTurn}>
+            <button type="button" className="secondary" onClick={passTurn} disabled={state.paused || state.selfSpectator || !isTurn}>
               Pass
             </button>
             <button type="button" className="secondary vote-action" onClick={voteEndRound} disabled={!canVoteEndRound}>
@@ -652,6 +796,15 @@ function PileNotice({
   )
 }
 
+function PauseOverlay() {
+  return (
+    <div className="pause-overlay" role="status" aria-live="polite">
+      <Pause size={34} />
+      <span>Paused</span>
+    </div>
+  )
+}
+
 function YouTubeFrame({ music }: { music: GameState['music'] }) {
   const embedUrl = continuousYouTubeUrl(music.embedUrl)
   return (
@@ -679,6 +832,51 @@ function continuousYouTubeUrl(embedUrl: string) {
   } catch {
     return embedUrl
   }
+}
+
+function sortCardsForExchange(cards: Card[]) {
+  return [...cards].sort((a, b) => a.strength - b.strength || a.suit.localeCompare(b.suit))
+}
+
+function weakestHandCard(cards: Card[]) {
+  return sortCardsForExchange(cards)[0] || null
+}
+
+function strongestHandCard(cards: Card[]) {
+  return sortCardsForExchange(cards).reverse()[0] || null
+}
+
+function PendingRejoinPanel({
+  requests,
+  onApprove,
+  onDecline,
+}: {
+  requests: GameState['pendingRejoins']
+  onApprove: (requestId: string) => void
+  onDecline: (requestId: string) => void
+}) {
+  return (
+    <section className="rejoin-panel" aria-live="polite">
+      <div className="rejoin-heading">
+        <UserRound size={18} />
+        <span>Rejoin requests</span>
+      </div>
+      {requests.map((request) => (
+        <div className="rejoin-request" key={request.id}>
+          <strong>{request.playerName}</strong>
+          <small>Wants back into this room</small>
+          <div className="rejoin-actions">
+            <button type="button" onClick={() => onApprove(request.id)} aria-label={`Approve ${request.playerName}`}>
+              <CheckCircle2 size={16} />
+            </button>
+            <button type="button" className="secondary danger" onClick={() => onDecline(request.id)} aria-label={`Decline ${request.playerName}`}>
+              <UserX size={16} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
+  )
 }
 
 function HostMusicPanel({ music }: { music: GameState['music'] }) {
@@ -745,7 +943,7 @@ function PlayerMusicPanel({ music }: { music: GameState['music'] }) {
   )
 }
 
-function ChatPanel({ messages, canSend }: { messages: ChatMessage[]; canSend: boolean }) {
+function ChatPanel({ messages, canSend, onTyping }: { messages: ChatMessage[]; canSend: boolean; onTyping?: () => void }) {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const feedRef = useRef<HTMLDivElement>(null)
@@ -792,7 +990,10 @@ function ChatPanel({ messages, canSend }: { messages: ChatMessage[]; canSend: bo
         <form className="chat-form" onSubmit={sendMessage}>
           <input
             value={message}
-            onChange={(event) => setMessage(event.target.value)}
+            onChange={(event) => {
+              setMessage(event.target.value)
+              if (event.target.value.trim()) onTyping?.()
+            }}
             maxLength={180}
             placeholder="Message active players"
           />
@@ -908,6 +1109,31 @@ function HostRoundResults({
   )
 }
 
+function HostExchangePanel({ exchange }: { exchange: NonNullable<GameState['exchange']> }) {
+  return (
+    <section className="host-exchange-panel" aria-live="polite">
+      <div className="results-heading">
+        <Layers3 size={30} />
+        <span>Card Exchange</span>
+      </div>
+      <div className="exchange-matchup">
+        <div>
+          <Crown size={28} />
+          <span>President</span>
+          <strong>{exchange.presidentName}</strong>
+          <small>{exchange.presidentReady ? 'Card selected' : 'Give weakest card'}</small>
+        </div>
+        <div>
+          <Sparkles size={28} />
+          <span>Fool</span>
+          <strong>{exchange.foolName}</strong>
+          <small>{exchange.foolReady ? 'Card selected' : 'Give strongest card'}</small>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function ResultRoleCard({
   title,
   player,
@@ -954,6 +1180,54 @@ function PlayerRoundResult({
   )
 }
 
+function PlayerExchangePanel({
+  exchange,
+  exchangeRole,
+  hand,
+  requiredCardId,
+  onSelect,
+}: {
+  exchange: GameState['exchange']
+  exchangeRole: PlayerRole | null
+  hand: Card[]
+  requiredCardId: string | null
+  onSelect: (card: Card) => void
+}) {
+  if (!exchange || !exchangeRole) {
+    return (
+      <section className="player-exchange-panel">
+        <Layers3 size={34} />
+        <h2>Card exchange</h2>
+        <p>President and Fool are choosing cards before the Fool starts.</p>
+      </section>
+    )
+  }
+
+  const isPresident = exchangeRole === 'president'
+  const alreadyReady = isPresident ? exchange.presidentReady : exchange.foolReady
+  return (
+    <section className="player-exchange-panel">
+      <RoleIcon role={exchangeRole} size={38} />
+      <span>{isPresident ? 'President exchange' : 'Fool exchange'}</span>
+      <h2>{isPresident ? 'Give weakest card' : 'Give strongest card'}</h2>
+      <p>{alreadyReady ? 'Card selected. Waiting for the other player.' : 'Tap the highlighted card to exchange it.'}</p>
+      <div className="exchange-hand-grid">
+        {hand.map((card, index) => (
+          <button
+            key={card.id}
+            type="button"
+            className={`hand-card ${card.id === requiredCardId ? 'selected' : ''}`}
+            disabled={alreadyReady || card.id !== requiredCardId}
+            onClick={() => onSelect(card)}
+          >
+            <SpanishCard card={card} compact index={index} />
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function TurnAnnouncement({ message }: { message: string }) {
   if (!message) return null
   return (
@@ -969,11 +1243,15 @@ function PlayerSeat({
   index,
   total,
   active,
+  activity,
+  onKick,
 }: {
   player: Player
   index: number
   total: number
   active: boolean
+  activity?: GameState['playerActivities'][number]
+  onKick?: () => void
 }) {
   const angle = (index / total) * Math.PI * 2 - Math.PI / 2
   const x = 50 + Math.cos(angle) * 42
@@ -988,6 +1266,12 @@ function PlayerSeat({
       <span>{player.name}</span>
       <strong>{player.finishedAt ? `Out #${player.finishedAt}` : `${player.handCount} cards`}</strong>
       <RoleBadge role={player.role} />
+      {activity && <div className={`activity-bubble activity-${activity.type}`}>{activity.text}</div>}
+      {onKick && (
+        <button type="button" className="seat-kick" onClick={onKick} aria-label={`Kick ${player.name}`}>
+          <UserX size={14} />
+        </button>
+      )}
     </div>
   )
 }
@@ -1135,7 +1419,7 @@ function RulesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
         <ol>
           <li>Each round deals the Spanish deck evenly across all seated players.</li>
-          <li>The first player leads with any card when the pile is empty.</li>
+          <li>A brand new game starts with the player holding the 3 of Coins.</li>
           <li>Cards rank from 3 up to 12, then 1, then 2. The 2 of Coins is the absolute highest card.</li>
           <li>After a lead, play one or more cards of the same rank that match or beat the current pile rank.</li>
           <li>Playing the same rank as the current pile skips the next active player.</li>
@@ -1145,6 +1429,8 @@ function RulesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <li>When every other active player passes, the pile clears and the last player who played leads again.</li>
           <li>The first player to run out of cards wins the round and becomes President.</li>
           <li>The last player remaining becomes Fool. Everyone else is Neutral.</li>
+          <li>Before the next round, the President gives their weakest card to the Fool, and the Fool gives their strongest card to the President.</li>
+          <li>After that exchange, the Fool starts the next round.</li>
           <li>If only two humans are seated, the table adds a Computer Player as the third seat.</li>
           <li>Round wins are saved locally and stay on the scoreboard for future rounds.</li>
         </ol>

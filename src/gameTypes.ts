@@ -78,6 +78,28 @@ export type PileNotice = {
   announcedAt: number
 } | null
 
+export type ExchangeState = {
+  presidentId: string
+  presidentName: string
+  foolId: string
+  foolName: string
+  presidentReady: boolean
+  foolReady: boolean
+} | null
+
+export type PlayerActivity = {
+  playerId: string
+  type: string
+  text: string
+  at: number
+}
+
+export type PendingRejoin = {
+  id: string
+  playerName: string
+  requestedAt: number
+}
+
 export type RoomMusic = {
   title: string
   embedUrl: string
@@ -87,7 +109,7 @@ export type RoomMusic = {
 
 export type GameState = {
   roomCode: string
-  phase: 'lobby' | 'playing' | 'finished'
+  phase: 'lobby' | 'playing' | 'finished' | 'exchange'
   players: Player[]
   pile: Card[]
   activeHand: Card[]
@@ -95,6 +117,8 @@ export type GameState = {
   currentPlayerName: string | null
   turnStartedAt: number | null
   turnSeconds: number
+  paused: boolean
+  pausedAt: number | null
   passCount: number
   finishOrder: string[]
   round: number
@@ -102,10 +126,13 @@ export type GameState = {
   scoreSummary: ScoreSummary
   skipNotice: SkipNotice
   pileNotice: PileNotice
+  exchange: ExchangeState
   endRoundVotes: number
   endRoundVoteTarget: number
   readyNextRoundCount: number
   readyNextRoundTarget: number
+  playerActivities: PlayerActivity[]
+  pendingRejoins: PendingRejoin[]
   music: RoomMusic
   chat: ChatMessage[]
   log: string[]

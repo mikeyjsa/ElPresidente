@@ -112,6 +112,8 @@ function createRoomState(code) {
     pileOwnerId: null,
     currentTurnId: null,
     turnStartedAt: null,
+    paused: false,
+    pausedAt: null,
     passCount: 0,
     finishOrder: [],
     round: Number(score.round) || 0,
@@ -121,6 +123,9 @@ function createRoomState(code) {
     pileNotice: null,
     endRoundVotes: [],
     readyNextRoundIds: [],
+    exchange: null,
+    playerActivities: {},
+    pendingRejoins: [],
     music: {
       ...DEFAULT_MUSIC,
       updatedAt: Date.now(),
@@ -265,6 +270,8 @@ function tableState() {
     activeHand: currentPlayer ? sortHand(currentPlayer.hand) : [],
     turnStartedAt: state.turnStartedAt,
     turnSeconds: TURN_SECONDS,
+    paused: Boolean(state.paused),
+    pausedAt: state.pausedAt,
     passCount: state.passCount,
     finishOrder: state.finishOrder,
     round: state.round,
@@ -272,10 +279,26 @@ function tableState() {
     scoreSummary: scoreSummary(),
     skipNotice: state.skipNotice,
     pileNotice: state.pileNotice,
+    exchange: state.exchange
+      ? {
+          presidentId: state.exchange.presidentId,
+          presidentName: state.players.find((player) => player.id === state.exchange.presidentId)?.name || 'President',
+          foolId: state.exchange.foolId,
+          foolName: state.players.find((player) => player.id === state.exchange.foolId)?.name || 'Fool',
+          presidentReady: Boolean(state.exchange.presidentCardId),
+          foolReady: Boolean(state.exchange.foolCardId),
+        }
+      : null,
     endRoundVotes: activeEndRoundVotes.length,
     endRoundVoteTarget: Math.max(1, Math.floor(endRoundVoters.length / 2) + 1),
     readyNextRoundCount: state.readyNextRoundIds.filter((playerId) => humanPlayers().some((player) => player.id === playerId)).length,
     readyNextRoundTarget: humanPlayers().length,
+    playerActivities: playerActivities(),
+    pendingRejoins: state.pendingRejoins.map((request) => ({
+      id: request.id,
+      playerName: request.playerName,
+      requestedAt: request.requestedAt,
+    })),
     music: state.music,
     chat: state.chat.slice(-CHAT_LIMIT),
     log: state.log.slice(-8).reverse(),
@@ -305,6 +328,41 @@ function humanPlayers() {
 
 function endRoundVotingPlayers() {
   return state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected && !player.finishedAt)
+}
+
+function playerActivities() {
+  const now = Date.now()
+  const activities = Object.entries(state.playerActivities || {})
+    .filter(([, activity]) => now - activity.at < 4500)
+    .map(([playerId, activity]) => ({ playerId, ...activity }))
+  if (state.phase === 'playing' && state.currentTurnId && !activities.some((activity) => activity.playerId === state.currentTurnId)) {
+    activities.push({ playerId: state.currentTurnId, type: 'thinking', text: 'Thinking...', at: now })
+  }
+  return activities
+}
+
+function setPlayerActivity(player, type) {
+  if (!player || player.isComputer) return
+  const labels = {
+    thinking: 'Thinking...',
+    typing: 'Typing...',
+    selecting: 'Selecting a card...',
+    ready: 'Ready!',
+    exchanging: 'Choosing exchange...',
+  }
+  state.playerActivities[player.id] = {
+    type,
+    text: labels[type] || 'Thinking...',
+    at: Date.now(),
+  }
+}
+
+function removePendingRejoin(requestId) {
+  state.pendingRejoins = state.pendingRejoins.filter((request) => request.id !== requestId)
+}
+
+function removePendingRejoinForPlayer(playerId) {
+  state.pendingRejoins = state.pendingRejoins.filter((request) => request.playerId !== playerId && request.id !== playerId)
 }
 
 function playerIdentity(rawIdentity = {}) {
@@ -415,6 +473,43 @@ function nextTurn(afterId = state.currentTurnId, skipNext = false) {
   }
 }
 
+function playerAfterIndex(index) {
+  if (!state.players.length) return null
+  for (let offset = 0; offset < state.players.length; offset += 1) {
+    const next = state.players[(index + offset + state.players.length) % state.players.length]
+    if (next && !next.finishedAt && !next.isSpectator) return next
+  }
+  return null
+}
+
+function removePlayerFromRoom(playerId, reason = 'removed from the room') {
+  const removedIndex = state.players.findIndex((player) => player.id === playerId)
+  if (removedIndex < 0) return null
+  const [player] = state.players.splice(removedIndex, 1)
+  state.endRoundVotes = state.endRoundVotes.filter((id) => id !== player.id)
+  state.readyNextRoundIds = state.readyNextRoundIds.filter((id) => id !== player.id)
+  delete state.playerActivities[player.id]
+  removePendingRejoinForPlayer(player.id)
+  if (state.pileOwnerId === player.id) clearPile('Pile cleared after a player left.')
+  if (state.exchange && (state.exchange.presidentId === player.id || state.exchange.foolId === player.id)) {
+    state.exchange = null
+    if (state.players.length) startPlayingRound(playerAfterIndex(removedIndex) || state.players[0], 'Exchange canceled after a player left.')
+  }
+  if (state.currentTurnId === player.id) {
+    const next = playerAfterIndex(removedIndex)
+    if (next) {
+      state.currentTurnId = next.id
+      state.turnStartedAt = Date.now()
+    } else {
+      state.currentTurnId = null
+      state.turnStartedAt = null
+    }
+  }
+  if (state.phase === 'playing' && activePlayers().length <= 1) endRound()
+  state.log.push(`${player.name} ${reason}.`)
+  return player
+}
+
 function clearPile(reason) {
   if (state.pile.length) state.log.push(reason)
   state.pile = []
@@ -456,6 +551,60 @@ function isPileCloser(card) {
   return card.rank === 2 && card.suit === 'oros'
 }
 
+function isThreeOfCoins(card) {
+  return card.rank === 3 && card.suit === 'oros'
+}
+
+function weakestCard(hand) {
+  return sortHand(hand)[0] || null
+}
+
+function strongestCard(hand) {
+  return [...sortHand(hand)].reverse()[0] || null
+}
+
+function requiredExchangeCard(player) {
+  if (!state.exchange || !player) return null
+  if (player.id === state.exchange.presidentId) return weakestCard(player.hand)
+  if (player.id === state.exchange.foolId) return strongestCard(player.hand)
+  return null
+}
+
+function maybeSelectComputerExchangeCards() {
+  if (!state.exchange) return
+  const president = state.players.find((player) => player.id === state.exchange.presidentId)
+  const fool = state.players.find((player) => player.id === state.exchange.foolId)
+  if (president?.isComputer) state.exchange.presidentCardId = requiredExchangeCard(president)?.id || null
+  if (fool?.isComputer) state.exchange.foolCardId = requiredExchangeCard(fool)?.id || null
+}
+
+function startPlayingRound(leader, reason) {
+  state.phase = 'playing'
+  state.currentTurnId = leader?.id || state.players[0]?.id || null
+  state.turnStartedAt = Date.now()
+  state.paused = false
+  state.pausedAt = null
+  const leaderName = leader?.name || state.players[0]?.name || 'First player'
+  state.log.push(reason || `Round ${state.round} started. ${leaderName} leads.`)
+}
+
+function finishExchangeIfReady() {
+  if (!state.exchange?.presidentCardId || !state.exchange?.foolCardId) return false
+  const president = state.players.find((player) => player.id === state.exchange.presidentId)
+  const fool = state.players.find((player) => player.id === state.exchange.foolId)
+  if (!president || !fool) return false
+  const presidentCard = president.hand.find((card) => card.id === state.exchange.presidentCardId)
+  const foolCard = fool.hand.find((card) => card.id === state.exchange.foolCardId)
+  if (!presidentCard || !foolCard) return false
+
+  president.hand = sortHand([...president.hand.filter((card) => card.id !== presidentCard.id), foolCard])
+  fool.hand = sortHand([...fool.hand.filter((card) => card.id !== foolCard.id), presidentCard])
+  state.log.push(`${president.name} gave their weakest card to ${fool.name}. ${fool.name} gave their strongest card to ${president.name}.`)
+  state.exchange = null
+  startPlayingRound(fool, `${fool.name} starts as Fool.`)
+  return true
+}
+
 function playCards(player, cards) {
   const previousPile = state.pile
   const cardIds = new Set(cards.map((card) => card.id))
@@ -468,8 +617,8 @@ function playCards(player, cards) {
   state.pileNotice = null
   state.log.push(`${player.name} played ${cards.map((card) => `${card.rankLabel} of ${card.suitName}`).join(', ')}.`)
   if (closesPile) {
-    clearPile(`${player.name} closed the pile with the 2 of Coins and leads again.`)
-    if (player.hand.length) announcePileLead(player, 'Pile cleared')
+    clearPile(`${player.name} placed 2 of Coins and cleared the pack.`)
+    if (player.hand.length) announcePileLead(player, `${player.name} placed 2 of Coins and cleared the pack`)
   }
   if (!player.hand.length) {
     player.finishedAt = state.finishOrder.length + 1
@@ -528,6 +677,8 @@ function endRound(reason = '') {
   state.phase = 'finished'
   state.currentTurnId = null
   state.turnStartedAt = null
+  state.paused = false
+  state.pausedAt = null
   state.pileNotice = null
   state.endRoundVotes = []
   state.readyNextRoundIds = []
@@ -537,7 +688,7 @@ function endRound(reason = '') {
   state.log.push(`${winner || 'Nobody'} is El Presidente.`)
 }
 
-function dealRound({ randomizeOrder = false } = {}) {
+function dealRound({ randomizeOrder = false, starter = 'fool' } = {}) {
   state.players = state.players.filter((player) => player.isComputer || player.connected)
   state.players.forEach((player) => {
     player.isSpectator = false
@@ -551,8 +702,11 @@ function dealRound({ randomizeOrder = false } = {}) {
   state.pileOwnerId = null
   state.skipNotice = null
   state.pileNotice = null
+  state.paused = false
+  state.pausedAt = null
   state.endRoundVotes = []
   state.readyNextRoundIds = []
+  state.exchange = null
   state.passCount = 0
   state.finishOrder = []
   if (randomizeOrder) state.players = shuffle(state.players)
@@ -566,10 +720,32 @@ function dealRound({ randomizeOrder = false } = {}) {
   state.players.forEach((player) => {
     player.hand = sortHand(player.hand)
   })
-  state.currentTurnId = state.players[0]?.id || null
-  state.turnStartedAt = Date.now()
-  state.log.push(`Round ${state.round} started. ${state.players[0]?.name || 'First player'} leads.`)
   state.log.push(`Play order: ${state.players.map((player) => player.name).join(', ')}.`)
+  if (starter === 'three-of-coins') {
+    const threeOfCoinsPlayer = state.players.find((player) => player.hand.some(isThreeOfCoins))
+    startPlayingRound(threeOfCoinsPlayer, `Round ${state.round} started. ${threeOfCoinsPlayer?.name || 'First player'} has the 3 of Coins and leads.`)
+    return
+  }
+
+  const president = state.players.find((player) => player.role === 'president')
+  const fool = state.players.find((player) => player.role === 'fool')
+  if (president && fool && president.id !== fool.id) {
+    state.phase = 'exchange'
+    state.currentTurnId = null
+    state.turnStartedAt = null
+    state.exchange = {
+      presidentId: president.id,
+      foolId: fool.id,
+      presidentCardId: null,
+      foolCardId: null,
+    }
+    state.log.push(`${president.name} and ${fool.name} must exchange cards before the Fool starts.`)
+    maybeSelectComputerExchangeCards()
+    finishExchangeIfReady()
+    return
+  }
+
+  startPlayingRound(fool || state.players[0], `${fool?.name || state.players[0]?.name || 'First player'} starts as Fool.`)
 }
 
 function emitAll() {
@@ -585,7 +761,7 @@ function scheduleComputerTurn() {
     clearTimeout(state.computerTurnTimer)
     state.computerTurnTimer = null
   }
-  if (state.phase !== 'playing') return
+  if (state.phase !== 'playing' || state.paused) return
   const player = state.players.find((item) => item.id === state.currentTurnId)
   if (!player?.isComputer || player.finishedAt) return
 
@@ -599,7 +775,7 @@ function scheduleComputerTurn() {
 
 function takeComputerTurn(playerId) {
   const player = state.players.find((item) => item.id === playerId)
-  if (!player || !player.isComputer || state.phase !== 'playing' || state.currentTurnId !== player.id || player.finishedAt) {
+  if (!player || !player.isComputer || state.phase !== 'playing' || state.paused || state.currentTurnId !== player.id || player.finishedAt) {
     return
   }
 
@@ -668,12 +844,22 @@ io.on('connection', (socket) => {
     }
     const existing = state.players.find((player) => !player.isComputer && player.name.toLowerCase() === name.toLowerCase())
     if (existing) {
-      existing.id = socket.id
-      existing.connected = true
-      existing.icon = identity.icon
-      existing.color = identity.color
-      existing.hand = existing.hand || []
-      reply?.({ ok: true, id: socket.id, roomCode: state.code, spectator: Boolean(existing.isSpectator) })
+      if (existing.connected) {
+        reply?.({ ok: false, error: 'That player is already seated.' })
+        return
+      }
+      removePendingRejoin(socket.id)
+      removePendingRejoinForPlayer(existing.id)
+      state.pendingRejoins.push({
+        id: socket.id,
+        playerId: existing.id,
+        playerName: existing.name,
+        icon: identity.icon,
+        color: identity.color,
+        requestedAt: Date.now(),
+      })
+      state.log.push(`${existing.name} asked to rejoin room ${state.code}.`)
+      reply?.({ ok: false, pending: true, error: 'Waiting for host approval.', roomCode: state.code })
     } else {
       const joinsAsSpectator = state.phase === 'playing'
       state.players.push({
@@ -705,7 +891,7 @@ io.on('connection', (socket) => {
       reply?.({ ok: false, error: 'At least two players need to join.' })
       return
     }
-    dealRound({ randomizeOrder: state.phase === 'lobby' })
+    dealRound({ randomizeOrder: state.phase === 'lobby', starter: 'three-of-coins' })
     reply?.({ ok: true })
     emitAll()
   })
@@ -722,8 +908,13 @@ io.on('connection', (socket) => {
     state.pileOwnerId = null
     state.skipNotice = null
     state.pileNotice = null
+    state.paused = false
+    state.pausedAt = null
     state.endRoundVotes = []
     state.readyNextRoundIds = []
+    state.exchange = null
+    state.playerActivities = {}
+    state.pendingRejoins = []
     state.currentTurnId = null
     state.turnStartedAt = null
     state.passCount = 0
@@ -737,6 +928,10 @@ io.on('connection', (socket) => {
   socket.on('playCards', (cardIds, reply) => {
     setRoomFromSocket(socket)
     const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (state.paused) {
+      reply?.({ ok: false, error: 'The game is paused.' })
+      return
+    }
     if (!player || player.isSpectator || state.phase !== 'playing' || state.currentTurnId !== player.id || player.finishedAt) {
       reply?.({ ok: false, error: 'It is not your turn.' })
       return
@@ -766,6 +961,7 @@ io.on('connection', (socket) => {
       return
     }
     const result = playCards(player, selected)
+    setPlayerActivity(player, 'selecting')
     reply?.({ ok: true })
     if (result.closesPile && !player.finishedAt) {
       state.currentTurnId = player.id
@@ -782,6 +978,10 @@ io.on('connection', (socket) => {
   socket.on('voteEndRound', (reply) => {
     setRoomFromSocket(socket)
     const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (state.paused) {
+      reply?.({ ok: false, error: 'The game is paused.' })
+      return
+    }
     if (!player || player.isSpectator || player.finishedAt || state.phase !== 'playing') {
       reply?.({ ok: false, error: 'Only active players can vote.' })
       return
@@ -804,6 +1004,7 @@ io.on('connection', (socket) => {
       return
     }
     if (!state.readyNextRoundIds.includes(player.id)) state.readyNextRoundIds.push(player.id)
+    setPlayerActivity(player, 'ready')
     const readyPlayers = humanPlayers()
     state.readyNextRoundIds = state.readyNextRoundIds.filter((playerId) => readyPlayers.some((readyPlayer) => readyPlayer.id === playerId))
     state.log.push(`${player.name} is ready for the next round (${state.readyNextRoundIds.length}/${readyPlayers.length}).`)
@@ -814,9 +1015,45 @@ io.on('connection', (socket) => {
     emitAll()
   })
 
+  socket.on('exchangeCard', (cardId, reply) => {
+    setRoomFromSocket(socket)
+    const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (state.paused) {
+      reply?.({ ok: false, error: 'The game is paused.' })
+      return
+    }
+    if (!player || player.isSpectator || state.phase !== 'exchange' || !state.exchange) {
+      reply?.({ ok: false, error: 'No exchange is waiting for you.' })
+      return
+    }
+    const requiredCard = requiredExchangeCard(player)
+    if (!requiredCard) {
+      reply?.({ ok: false, error: 'You are not part of this exchange.' })
+      return
+    }
+    if (cardId !== requiredCard.id) {
+      reply?.({
+        ok: false,
+        error: player.id === state.exchange.presidentId ? 'President must give the weakest card.' : 'Fool must give the strongest card.',
+      })
+      return
+    }
+    if (player.id === state.exchange.presidentId) state.exchange.presidentCardId = requiredCard.id
+    if (player.id === state.exchange.foolId) state.exchange.foolCardId = requiredCard.id
+    setPlayerActivity(player, 'exchanging')
+    state.log.push(`${player.name} selected their exchange card.`)
+    finishExchangeIfReady()
+    reply?.({ ok: true })
+    emitAll()
+  })
+
   socket.on('passTurn', (reply) => {
     setRoomFromSocket(socket)
     const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (state.paused) {
+      reply?.({ ok: false, error: 'The game is paused.' })
+      return
+    }
     if (!player || player.isSpectator || state.phase !== 'playing' || state.currentTurnId !== player.id) {
       reply?.({ ok: false, error: 'It is not your turn.' })
       return
@@ -851,6 +1088,94 @@ io.on('connection', (socket) => {
       sentAt: new Date().toISOString(),
     })
     state.chat = state.chat.slice(-CHAT_LIMIT)
+    setPlayerActivity(player, 'typing')
+    reply?.({ ok: true })
+    emitAll()
+  })
+
+  socket.on('playerActivity', (type) => {
+    setRoomFromSocket(socket)
+    const player = state.players.find((item) => item.id === socket.id && !item.isComputer)
+    if (!player || player.isSpectator) return
+    if (!['thinking', 'typing', 'selecting', 'ready', 'exchanging'].includes(type)) return
+    setPlayerActivity(player, type)
+    emitAll()
+  })
+
+  socket.on('setPaused', (paused, reply) => {
+    setRoomFromSocket(socket)
+    const nextPaused = Boolean(paused)
+    if (state.paused === nextPaused) {
+      reply?.({ ok: true })
+      return
+    }
+    if (nextPaused) {
+      state.paused = true
+      state.pausedAt = Date.now()
+      if (state.computerTurnTimer) {
+        clearTimeout(state.computerTurnTimer)
+        state.computerTurnTimer = null
+      }
+      state.log.push('Host paused the game.')
+    } else {
+      const pausedDuration = state.pausedAt ? Date.now() - state.pausedAt : 0
+      if (state.turnStartedAt) state.turnStartedAt += pausedDuration
+      state.paused = false
+      state.pausedAt = null
+      state.log.push('Host resumed the game.')
+    }
+    reply?.({ ok: true })
+    emitAll()
+  })
+
+  socket.on('kickPlayer', (playerId, reply) => {
+    setRoomFromSocket(socket)
+    const player = state.players.find((item) => item.id === playerId)
+    if (!player || player.isComputer) {
+      reply?.({ ok: false, error: 'That player cannot be kicked.' })
+      return
+    }
+    removePlayerFromRoom(player.id, 'was kicked by the host')
+    io.to(player.id).emit('lobbyReset', { roomCode: state.code })
+    reply?.({ ok: true })
+    emitAll()
+  })
+
+  socket.on('approveRejoin', (requestId, reply) => {
+    setRoomFromSocket(socket)
+    const request = state.pendingRejoins.find((item) => item.id === requestId)
+    if (!request) {
+      reply?.({ ok: false, error: 'That rejoin request is gone.' })
+      return
+    }
+    const player = state.players.find((item) => item.id === request.playerId || item.name === request.playerName)
+    if (!player || player.isComputer) {
+      removePendingRejoin(request.id)
+      reply?.({ ok: false, error: 'That player no longer has a seat.' })
+      emitAll()
+      return
+    }
+    player.id = request.id
+    player.connected = true
+    player.icon = request.icon
+    player.color = request.color
+    removePendingRejoin(request.id)
+    state.log.push(`${player.name} was approved to rejoin.`)
+    io.to(player.id).emit('rejoinApproved', { roomCode: state.code })
+    reply?.({ ok: true })
+    emitAll()
+  })
+
+  socket.on('declineRejoin', (requestId, reply) => {
+    setRoomFromSocket(socket)
+    const request = state.pendingRejoins.find((item) => item.id === requestId)
+    if (!request) {
+      reply?.({ ok: false, error: 'That rejoin request is gone.' })
+      return
+    }
+    removePendingRejoin(request.id)
+    io.to(request.id).emit('rejoinDeclined', { roomCode: state.code })
+    state.log.push(`${request.playerName}'s rejoin request was declined.`)
     reply?.({ ok: true })
     emitAll()
   })
@@ -876,12 +1201,17 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     setRoomFromSocket(socket)
+    const hadPendingRejoin = state.pendingRejoins.some((item) => item.id === socket.id)
+    removePendingRejoin(socket.id)
     const player = state.players.find((item) => item.id === socket.id)
     if (player) {
       player.connected = false
       state.endRoundVotes = state.endRoundVotes.filter((playerId) => playerId !== player.id)
       state.readyNextRoundIds = state.readyNextRoundIds.filter((playerId) => playerId !== player.id)
+      delete state.playerActivities[player.id]
       state.log.push(`${player.name} disconnected.`)
+      emitAll()
+    } else if (hadPendingRejoin) {
       emitAll()
     }
   })
@@ -891,6 +1221,7 @@ setInterval(() => {
   for (const room of rooms.values()) {
     state = room
     if (state.phase !== 'playing' || !state.currentTurnId || !state.turnStartedAt) continue
+    if (state.paused) continue
     if (Date.now() - state.turnStartedAt > TURN_SECONDS * 1000) {
       const player = state.players.find((item) => item.id === state.currentTurnId)
       if (player) {
