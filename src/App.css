@@ -529,28 +529,51 @@ p {
   line-height: 1;
 }
 
+.game-notice {
+  border: 2px solid rgba(255, 233, 136, 0.72);
+  color: #fff8d8;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.5), 0 0 48px rgba(255, 107, 107, 0.28), inset 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.game-notice svg {
+  color: #ffe988;
+  filter: drop-shadow(0 0 12px rgba(255, 233, 136, 0.55));
+}
+
 .skip-notice {
   position: fixed;
   left: 50%;
-  top: 18px;
+  top: 16%;
   z-index: 19;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 42px;
-  max-width: calc(100vw - 32px);
-  padding: 0 16px;
-  border: 1px solid rgba(248, 129, 129, 0.5);
+  gap: 12px;
+  min-height: 76px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 14px 22px;
   border-radius: 8px;
-  background: rgba(80, 24, 16, 0.94);
-  color: #ffd9cf;
-  font-size: 14px;
+  background:
+    linear-gradient(135deg, rgba(125, 22, 73, 0.97), rgba(202, 61, 38, 0.96) 48%, rgba(105, 42, 143, 0.96)),
+    #7d1649;
+  font-family: Georgia, serif;
+  font-size: clamp(24px, 7vw, 42px);
   font-weight: 900;
+  line-height: 1;
   text-align: center;
-  transform: translateX(-50%);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  transform: translateX(-50%) rotate(-1deg);
   pointer-events: none;
+  animation: notice-pop 2.8s ease both;
+  backdrop-filter: blur(10px);
+}
+
+.skip-notice svg {
+  flex: 0 0 auto;
+}
+
+.skip-notice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .pile-notice {
@@ -564,32 +587,35 @@ p {
   width: min(560px, calc(100vw - 36px));
   min-height: 136px;
   padding: 24px 28px;
-  border: 1px solid rgba(130, 219, 162, 0.62);
   border-radius: 8px;
-  background: rgba(17, 62, 42, 0.94);
-  color: #cff8db;
+  background:
+    linear-gradient(135deg, rgba(12, 100, 81, 0.98), rgba(19, 138, 76, 0.96) 52%, rgba(27, 86, 164, 0.96)),
+    #113e2a;
   font-family: Georgia, serif;
   font-size: clamp(24px, 7vw, 42px);
   font-weight: 800;
   line-height: 1.05;
   text-align: center;
   transform: translate(-50%, -50%);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 44px rgba(130, 219, 162, 0.2);
   pointer-events: none;
-  animation: turn-toast 2.4s ease both;
+  animation: notice-pop 3.2s ease both;
   backdrop-filter: blur(12px);
 }
 
 .skip-notice.is-self {
   border-color: rgba(242, 191, 87, 0.72);
-  background: rgba(93, 61, 13, 0.95);
-  color: #fff1bf;
+  background:
+    linear-gradient(135deg, rgba(209, 122, 22, 0.98), rgba(122, 65, 212, 0.96)),
+    #5d3d0d;
+  color: #fff8d8;
 }
 
 .pile-notice.is-self {
   border-color: rgba(242, 191, 87, 0.72);
-  background: rgba(93, 61, 13, 0.95);
-  color: #fff1bf;
+  background:
+    linear-gradient(135deg, rgba(209, 122, 22, 0.98), rgba(19, 138, 76, 0.96)),
+    #5d3d0d;
+  color: #fff8d8;
 }
 
 .pause-overlay {
@@ -600,22 +626,21 @@ p {
   place-items: center;
   align-content: center;
   gap: 12px;
-  background: rgba(5, 3, 2, 0.56);
-  color: #fff1bf;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 233, 136, 0.16), transparent 22%),
+    linear-gradient(135deg, rgba(46, 32, 122, 0.76), rgba(147, 39, 95, 0.7), rgba(9, 90, 76, 0.72)),
+    rgba(5, 3, 2, 0.66);
   font-family: Georgia, serif;
   font-size: clamp(48px, 14vw, 120px);
   font-weight: 800;
   text-align: center;
   pointer-events: none;
-  backdrop-filter: blur(4px);
+  text-shadow: 0 5px 24px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(5px);
 }
 
 .pause-overlay.is-host {
   pointer-events: auto;
-}
-
-.pause-overlay svg {
-  color: #f7d783;
 }
 
 .pause-overlay button {
@@ -2230,8 +2255,9 @@ p {
 
 .error-text {
   margin-top: 12px;
-  color: #ffb19f;
+  color: #ffe9c4;
   font-size: 14px;
+  font-weight: 800;
 }
 
 .error-text.floating {
@@ -2239,9 +2265,17 @@ p {
   left: 18px;
   right: 18px;
   bottom: 82px;
-  padding: 10px 12px;
+  z-index: 22;
+  padding: 14px 16px;
+  border: 2px solid rgba(255, 233, 136, 0.62);
   border-radius: 8px;
-  background: rgba(74, 20, 12, 0.94);
+  background:
+    linear-gradient(135deg, rgba(125, 22, 73, 0.97), rgba(202, 61, 38, 0.96)),
+    #7d1649;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 0 34px rgba(255, 107, 107, 0.3);
+  text-align: center;
+  animation: notice-pop 3.2s ease both;
+  backdrop-filter: blur(10px);
 }
 
 @media (max-width: 1100px) {
@@ -2511,6 +2545,27 @@ p {
   100% {
     opacity: 0;
     transform: translate(-50%, -56%) scale(0.98);
+  }
+}
+
+@keyframes notice-pop {
+  0% {
+    opacity: 0;
+    scale: 0.86;
+    filter: saturate(1.2) brightness(1.1);
+  }
+
+  14%,
+  78% {
+    opacity: 1;
+    scale: 1;
+    filter: saturate(1.1) brightness(1);
+  }
+
+  100% {
+    opacity: 0;
+    scale: 0.96;
+    filter: saturate(0.9) brightness(0.92);
   }
 }
 

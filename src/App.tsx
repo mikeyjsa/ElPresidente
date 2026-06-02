@@ -165,8 +165,10 @@ function useSocketState(player = false, requestedRoomCode = '') {
   const [connected, setConnected] = useState(() => socket.connected)
 
   useEffect(() => {
+    const expectedRoomCode = requestedRoomCode.trim().toUpperCase()
     const eventName = player ? 'playerState' : 'tableState'
     const onState = (nextState: GameState) => {
+      if (!player && expectedRoomCode && nextState.roomCode !== expectedRoomCode) return
       setState(nextState)
       if (!player && nextState.roomCode) {
         window.localStorage.setItem('el-presidente-room', nextState.roomCode)
@@ -181,14 +183,17 @@ function useSocketState(player = false, requestedRoomCode = '') {
         turnStartedAt: pauseState.turnStartedAt,
       }))
     }
-    const onConnect = () => setConnected(true)
+    const onConnect = () => {
+      setConnected(true)
+      if (!player || expectedRoomCode) socket.emit('watchRoom', expectedRoomCode, () => undefined)
+    }
     const onDisconnect = () => setConnected(false)
 
     socket.on(eventName, onState)
     socket.on('pauseState', onPauseState)
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
-    if (!player || requestedRoomCode) socket.emit('watchRoom', requestedRoomCode, () => undefined)
+    if (!player || expectedRoomCode) socket.emit('watchRoom', expectedRoomCode, () => undefined)
 
     return () => {
       socket.off(eventName, onState)
@@ -430,6 +435,19 @@ function PlayerScreen() {
   const canVoteEndRound = joined && !state.paused && state.phase === 'playing' && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt) && !state.selfVotedEndRound
   const canReadyNextRound = joined && !state.paused && state.phase === 'finished' && !state.selfSpectator && !state.selfReadyNextRound
   const exchangeRole = state.exchange?.presidentId === state.selfId ? 'president' : state.exchange?.foolId === state.selfId ? 'fool' : null
+  const phoneStatusTitle = state.selfSpectator
+    ? 'Spectating'
+    : isTurn
+      ? 'Your turn'
+      : state.currentPlayerName
+        ? `${state.currentPlayerName} is up`
+        : state.phase === 'exchange'
+          ? 'Card exchange'
+          : state.phase === 'finished'
+            ? 'Round finished'
+            : state.phase === 'lobby'
+              ? 'Waiting for players'
+              : 'Waiting for turn'
   const exchangeCard = useMemo(() => {
     if (!exchangeRole) return null
     return exchangeRole === 'president' ? weakestHandCard(hand) : strongestHandCard(hand)
@@ -643,7 +661,7 @@ function PlayerScreen() {
       <header className="phone-header">
         <div>
           <span>{state.selfSpectator ? `Watching ${state.roomCode}` : state.selfName}</span>
-          <h1>{state.selfSpectator ? 'Spectating' : isTurn ? 'Your turn' : `${state.currentPlayerName || 'Table'} is up`}</h1>
+          <h1>{phoneStatusTitle}</h1>
         </div>
         <div className="mini-timer">{seconds}s</div>
       </header>
@@ -772,8 +790,8 @@ function SkipNotice({
   if (!notice || hiddenNoticeKey === noticeKey) return null
   const isSelf = notice.playerId === selfId
   return (
-    <div className={`skip-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
-      <Sparkles size={18} />
+    <div className={`game-notice skip-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
+      <Sparkles size={28} />
       <span>{isSelf ? 'You were skipped' : `${notice.playerName} was skipped`}</span>
     </div>
   )
@@ -799,8 +817,8 @@ function PileNotice({
   const isSelf = notice.playerId === selfId
   const message = isSelf ? 'Pile cleared. You start.' : notice.message
   return (
-    <div className={`pile-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
-      <Layers3 size={18} />
+    <div className={`game-notice pile-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
+      <Layers3 size={30} />
       <span>{message}</span>
     </div>
   )
@@ -808,7 +826,7 @@ function PileNotice({
 
 function PauseOverlay({ onResume }: { onResume?: () => void }) {
   return (
-    <div className={`pause-overlay ${onResume ? 'is-host' : ''}`} role="status" aria-live="polite">
+    <div className={`game-notice pause-overlay ${onResume ? 'is-host' : ''}`} role="status" aria-live="polite">
       <Pause size={34} />
       <span>Paused</span>
       {onResume && (
