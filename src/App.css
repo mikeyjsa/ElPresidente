@@ -602,6 +602,51 @@ p {
   backdrop-filter: blur(12px);
 }
 
+.alert-notice {
+  position: fixed;
+  left: 50%;
+  top: 28%;
+  z-index: 19;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: min(520px, calc(100vw - 32px));
+  min-height: 72px;
+  padding: 14px 22px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(27, 86, 164, 0.97), rgba(19, 138, 76, 0.96) 52%, rgba(125, 22, 73, 0.96)),
+    #1b56a4;
+  font-family: Georgia, serif;
+  font-size: clamp(22px, 6vw, 38px);
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: notice-pop 3s ease both;
+  backdrop-filter: blur(10px);
+}
+
+.alert-notice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.alert-one-card {
+  background:
+    linear-gradient(135deg, rgba(209, 122, 22, 0.98), rgba(202, 61, 38, 0.96) 52%, rgba(122, 65, 212, 0.96)),
+    #d17a16;
+}
+
+.alert-notice.is-self {
+  border-color: rgba(255, 248, 216, 0.82);
+  background:
+    linear-gradient(135deg, rgba(209, 122, 22, 0.98), rgba(19, 138, 76, 0.96)),
+    #5d3d0d;
+}
+
 .skip-notice.is-self {
   border-color: rgba(242, 191, 87, 0.72);
   background:
@@ -992,6 +1037,14 @@ p {
   min-height: 270px;
   display: grid;
   place-items: center;
+}
+
+.pile-zone.is-clearing {
+  animation: pile-clear-pop 900ms ease both;
+}
+
+.pile-zone.is-clearing .pile-halo {
+  animation: pile-clear-halo 900ms ease both;
 }
 
 .pile-halo {
@@ -2493,6 +2546,41 @@ p {
   50% {
     opacity: 0.78;
     transform: scale(1.08);
+  }
+}
+
+@keyframes pile-clear-pop {
+  0% {
+    scale: 1;
+    filter: brightness(1);
+  }
+
+  35% {
+    scale: 1.08;
+    filter: brightness(1.35) saturate(1.2);
+  }
+
+  100% {
+    scale: 1;
+    filter: brightness(1);
+  }
+}
+
+@keyframes pile-clear-halo {
+  0% {
+    opacity: 0.65;
+    scale: 1;
+  }
+
+  42% {
+    opacity: 1;
+    scale: 1.5;
+    background: radial-gradient(ellipse, rgba(255, 233, 136, 0.36), rgba(19, 138, 76, 0.22), transparent 68%);
+  }
+
+  100% {
+    opacity: 0.65;
+    scale: 1;
   }
 }
 

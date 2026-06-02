@@ -78,6 +78,14 @@ export type PileNotice = {
   announcedAt: number
 } | null
 
+export type AlertNotice = {
+  kind: 'pass' | 'one-card'
+  message: string
+  playerId: string | null
+  playerName: string
+  announcedAt: number
+} | null
+
 export type ExchangeState = {
   presidentId: string
   presidentName: string
@@ -126,6 +134,7 @@ export type GameState = {
   scoreSummary: ScoreSummary
   skipNotice: SkipNotice
   pileNotice: PileNotice
+  alertNotice: AlertNotice
   exchange: ExchangeState
   endRoundVotes: number
   endRoundVoteTarget: number

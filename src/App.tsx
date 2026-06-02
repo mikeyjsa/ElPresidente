@@ -91,6 +91,7 @@ const emptyState: GameState = {
   },
   skipNotice: null,
   pileNotice: null,
+  alertNotice: null,
   exchange: null,
   endRoundVotes: 0,
   endRoundVoteTarget: 0,
@@ -125,12 +126,24 @@ function useCardAssetsReady() {
 
   useEffect(() => {
     let cancelled = false
+    const preloadLinks = cardAssetPaths.map((src) => {
+      const link = document.createElement('link')
+      link.rel = 'preload'
+      link.as = 'image'
+      link.href = src
+      document.head.appendChild(link)
+      return link
+    })
     Promise.all(
       cardAssetPaths.map(
         (src) =>
           new Promise<void>((resolve) => {
             const image = new Image()
-            image.onload = () => resolve()
+            image.decoding = 'async'
+            image.onload = () => {
+              if (image.decode) image.decode().then(() => resolve()).catch(() => resolve())
+              else resolve()
+            }
             image.onerror = () => resolve()
             image.src = src
           }),
@@ -140,6 +153,7 @@ function useCardAssetsReady() {
     })
     return () => {
       cancelled = true
+      preloadLinks.forEach((link) => link.remove())
     }
   }, [])
 
@@ -322,6 +336,7 @@ function HostScreen() {
         {state.paused && <PauseOverlay onResume={togglePause} />}
         <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
         <PileNotice notice={state.pileNotice} selfId={state.selfId} />
+        <AlertNotice notice={state.alertNotice} selfId={state.selfId} />
         <div className="top-controls">
           <div className="table-stat">
             <UsersRound size={16} />
@@ -377,7 +392,7 @@ function HostScreen() {
                   : `${humanPlayers.length}/${minimumHumansWithComputer} humans ready`}
               </small>
             </div>
-            <div className="pile-zone">
+            <div className={`pile-zone ${state.pileNotice ? 'is-clearing' : ''}`}>
               <div className="pile-halo" aria-hidden="true" />
               {state.pile.length ? (
                 state.pile.map((card, index) => <SpanishCard key={card.id} card={card} stacked={index} />)
@@ -431,9 +446,11 @@ function PlayerScreen() {
   const hand = useMemo(() => state.hand || [], [state.hand])
   const isTurn = state.currentTurnId === state.selfId
   const selfPlayer = state.players.find((player) => player.id === state.selfId)
-  const canChat = joined && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt)
-  const canVoteEndRound = joined && !state.paused && state.phase === 'playing' && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt) && !state.selfVotedEndRound
-  const canReadyNextRound = joined && !state.paused && state.phase === 'finished' && !state.selfSpectator && !state.selfReadyNextRound
+  const activeJoined = joined || Boolean(joinPending && state.selfId && state.selfName)
+  const displayError = activeJoined && joinPending ? '' : error
+  const canChat = activeJoined && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt)
+  const canVoteEndRound = activeJoined && !state.paused && state.phase === 'playing' && !state.selfSpectator && Boolean(selfPlayer && !selfPlayer.finishedAt) && !state.selfVotedEndRound
+  const canReadyNextRound = activeJoined && !state.paused && state.phase === 'finished' && !state.selfSpectator && !state.selfReadyNextRound
   const exchangeRole = state.exchange?.presidentId === state.selfId ? 'president' : state.exchange?.foolId === state.selfId ? 'fool' : null
   const phoneStatusTitle = state.selfSpectator
     ? 'Spectating'
@@ -593,7 +610,7 @@ function PlayerScreen() {
     if (isTurn && state.phase === 'playing' && !state.paused) socket.emit('playerActivity', 'thinking')
   }, [isTurn, state.phase, state.paused, state.currentTurnId])
 
-  if (!joined) {
+  if (!activeJoined) {
     return (
       <main className="phone-shell join-phone">
         <div className="phone-card">
@@ -641,7 +658,7 @@ function PlayerScreen() {
               </form>
             </>
           )}
-          {error && <p className="error-text">{error}</p>}
+          {displayError && <p className="error-text">{displayError}</p>}
           <StatusPill connected={connected} />
         </div>
         <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
@@ -657,6 +674,7 @@ function PlayerScreen() {
       />
       <SkipNotice notice={state.skipNotice} selfId={state.selfId} />
       <PileNotice notice={state.pileNotice} selfId={state.selfId} />
+      <AlertNotice notice={state.alertNotice} selfId={state.selfId} />
       {state.paused && <PauseOverlay />}
       <header className="phone-header">
         <div>
@@ -765,7 +783,7 @@ function PlayerScreen() {
           Rules
         </button>
       </footer>
-      {error && <p className="error-text floating">{error}</p>}
+      {displayError && <p className="error-text floating">{displayError}</p>}
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </main>
   )
@@ -819,6 +837,33 @@ function PileNotice({
   return (
     <div className={`game-notice pile-notice ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
       <Layers3 size={30} />
+      <span>{message}</span>
+    </div>
+  )
+}
+
+function AlertNotice({
+  notice,
+  selfId,
+}: {
+  notice: GameState['alertNotice']
+  selfId?: string | null
+}) {
+  const [hiddenNoticeKey, setHiddenNoticeKey] = useState('')
+  const noticeKey = notice ? `${notice.kind}-${notice.playerId || 'table'}-${notice.announcedAt}` : ''
+
+  useEffect(() => {
+    if (!noticeKey) return
+    const timeout = window.setTimeout(() => setHiddenNoticeKey(noticeKey), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [noticeKey])
+
+  if (!notice || hiddenNoticeKey === noticeKey) return null
+  const isSelf = notice.playerId === selfId
+  const message = isSelf && notice.kind === 'one-card' ? 'You have 1 card left!' : notice.message
+  return (
+    <div className={`game-notice alert-notice alert-${notice.kind} ${isSelf ? 'is-self' : ''}`} role="status" aria-live="polite">
+      {notice.kind === 'one-card' ? <Sparkles size={28} /> : <Flag size={28} />}
       <span>{message}</span>
     </div>
   )

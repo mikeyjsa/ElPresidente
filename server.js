@@ -121,6 +121,7 @@ function createRoomState(code) {
     recentWinners: score.recentWinners || [],
     skipNotice: null,
     pileNotice: null,
+    alertNotice: null,
     endRoundVotes: [],
     readyNextRoundIds: [],
     exchange: null,
@@ -279,6 +280,7 @@ function tableState() {
     scoreSummary: scoreSummary(),
     skipNotice: state.skipNotice,
     pileNotice: state.pileNotice,
+    alertNotice: state.alertNotice,
     exchange: state.exchange
       ? {
           presidentId: state.exchange.presidentId,
@@ -341,7 +343,11 @@ function playerActivities() {
   return activities
 }
 
-function setPlayerActivity(player, type) {
+function randomFrom(items) {
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+function setPlayerActivity(player, type, text = '') {
   if (!player || player.isComputer) return
   const labels = {
     thinking: 'Thinking...',
@@ -349,12 +355,26 @@ function setPlayerActivity(player, type) {
     selecting: 'Selecting a card...',
     ready: 'Ready!',
     exchanging: 'Choosing exchange...',
+    passed: randomFrom(['Passing.', 'Nope, pass.', 'Saving these.', 'Not this time.']),
+    skipped: randomFrom(['lol', 'Too slow!', 'Skip!', 'Next one waits.', 'Gotcha.']),
+    oneCard: randomFrom(['One card left!', 'Almost out!', 'Down to one.', 'Final card.']),
   }
   state.playerActivities[player.id] = {
     type,
-    text: labels[type] || 'Thinking...',
+    text: text || labels[type] || 'Thinking...',
     at: Date.now(),
   }
+}
+
+function announceAlert(kind, player, message) {
+  state.alertNotice = {
+    kind,
+    message,
+    playerId: player?.id || null,
+    playerName: player?.name || 'Player',
+    announcedAt: Date.now(),
+  }
+  state.log.push(message)
 }
 
 function removePendingRejoin(requestId) {
@@ -463,6 +483,8 @@ function nextTurn(afterId = state.currentTurnId, skipNext = false) {
           playerName: next.name,
           skippedAt: Date.now(),
         }
+        const skipper = state.players.find((player) => player.id === afterId)
+        setPlayerActivity(skipper, 'skipped')
         state.log.push(`${next.name} was skipped by a matching rank.`)
         continue
       }
@@ -615,7 +637,13 @@ function playCards(player, cards) {
   state.pileOwnerId = player.id
   state.passCount = 0
   state.pileNotice = null
+  state.alertNotice = null
   state.log.push(`${player.name} played ${cards.map((card) => `${card.rankLabel} of ${card.suitName}`).join(', ')}.`)
+  const cardsLeft = player.hand.length
+  if (cardsLeft === 1) {
+    announceAlert('one-card', player, `${player.name} has 1 card left!`)
+    setPlayerActivity(player, 'oneCard')
+  }
   if (closesPile) {
     clearPile(`${player.name} placed 2 of Coins and cleared the pack.`)
     if (player.hand.length) announcePileLead(player, `${player.name} placed 2 of Coins and cleared the pack`)
@@ -631,7 +659,8 @@ function playCards(player, cards) {
 
 function passPlayer(player, reason = 'passed') {
   state.passCount += 1
-  state.log.push(`${player.name} ${reason}.`)
+  announceAlert('pass', player, `${player.name} has passed.`)
+  setPlayerActivity(player, 'passed')
   if (state.passCount >= Math.max(1, activePlayers().length - 1)) {
     const pileOwnerId = state.pileOwnerId
     clearPile('Everyone else passed. The pile is cleared.')
@@ -680,6 +709,7 @@ function endRound(reason = '') {
   state.paused = false
   state.pausedAt = null
   state.pileNotice = null
+  state.alertNotice = null
   state.endRoundVotes = []
   state.readyNextRoundIds = []
   state.players.forEach((player) => {
@@ -702,6 +732,7 @@ function dealRound({ randomizeOrder = false, starter = 'fool' } = {}) {
   state.pileOwnerId = null
   state.skipNotice = null
   state.pileNotice = null
+  state.alertNotice = null
   state.paused = false
   state.pausedAt = null
   state.endRoundVotes = []
@@ -916,6 +947,7 @@ io.on('connection', (socket) => {
     state.pileOwnerId = null
     state.skipNotice = null
     state.pileNotice = null
+    state.alertNotice = null
     state.paused = false
     state.pausedAt = null
     state.endRoundVotes = []
@@ -1173,6 +1205,7 @@ io.on('connection', (socket) => {
     removePendingRejoin(request.id)
     state.log.push(`${player.name} was approved to rejoin.`)
     io.to(player.id).emit('rejoinApproved', { roomCode: state.code })
+    io.to(player.id).emit('playerState', playerState(player))
     reply?.({ ok: true })
     emitAll()
   })
