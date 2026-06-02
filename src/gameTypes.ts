@@ -71,6 +71,13 @@ export type SkipNotice = {
   skippedAt: number
 } | null
 
+export type RoomMusic = {
+  title: string
+  embedUrl: string
+  source: string
+  updatedAt: number
+}
+
 export type GameState = {
   roomCode: string
   phase: 'lobby' | 'playing' | 'finished'
@@ -87,6 +94,7 @@ export type GameState = {
   recentWinners: RecentWinner[]
   scoreSummary: ScoreSummary
   skipNotice: SkipNotice
+  music: RoomMusic
   chat: ChatMessage[]
   log: string[]
   joinUrl: string

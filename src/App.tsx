@@ -12,7 +12,10 @@ import {
   Heart,
   Hourglass,
   Layers3,
+  Maximize2,
   MessageCircle,
+  Minimize2,
+  Music,
   Play,
   RefreshCw,
   Send,
@@ -78,6 +81,12 @@ const emptyState: GameState = {
     topWinner: null,
   },
   skipNotice: null,
+  music: {
+    title: 'Reggaeton Espanol',
+    embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk',
+    source: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk',
+    updatedAt: 0,
+  },
   chat: [],
   log: [],
   joinUrl: `${window.location.origin}/join`,
@@ -144,6 +153,7 @@ function HostScreen() {
   const { state, connected } = useSocketState(false, hostRoomCode)
   const [qr, setQr] = useState('')
   const [rulesOpen, setRulesOpen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(document.fullscreenElement))
   const seconds = useCountdown(state)
   const humanPlayers = state.players.filter((player) => !player.isComputer && !player.isSpectator && player.connected)
   const canStart = humanPlayers.length >= minimumHumansWithComputer && state.phase !== 'playing'
@@ -156,8 +166,21 @@ function HostScreen() {
     }).then(setQr)
   }, [state.joinUrl])
 
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
   const startGame = () => socket.emit('startGame', () => undefined)
   const resetLobby = () => socket.emit('resetLobby')
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      document.documentElement.requestFullscreen()
+    }
+  }
 
   return (
     <main className={`host-shell phase-${state.phase}`}>
@@ -179,6 +202,7 @@ function HostScreen() {
           <span>Scan or enter the room code to join</span>
           <p>{state.joinUrl}</p>
         </div>
+        <HostMusicPanel music={state.music} />
         <div className="host-actions">
           <button type="button" onClick={startGame} disabled={!canStart}>
             <Play size={18} />
@@ -191,6 +215,10 @@ function HostScreen() {
           <button type="button" className="secondary" onClick={() => setRulesOpen(true)}>
             <BookOpen size={18} />
             Rules
+          </button>
+          <button type="button" className="secondary" onClick={toggleFullscreen}>
+            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           </button>
         </div>
         {state.phase !== 'playing' && (
@@ -479,6 +507,7 @@ function PlayerScreen() {
           ))
         )}
       </section>
+      <PlayerMusicPanel music={state.music} />
       <ChatPanel messages={state.chat} canSend={canChat} />
 
       <footer className="phone-actions">
@@ -527,6 +556,83 @@ function SkipNotice({
       <Sparkles size={18} />
       <span>{isSelf ? 'You were skipped' : `${notice.playerName} was skipped`}</span>
     </div>
+  )
+}
+
+function YouTubeFrame({ music }: { music: GameState['music'] }) {
+  return (
+    <iframe
+      className="youtube-frame"
+      src={music.embedUrl}
+      title={`YouTube music: ${music.title}`}
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      referrerPolicy="strict-origin-when-cross-origin"
+      allowFullScreen
+    />
+  )
+}
+
+function HostMusicPanel({ music }: { music: GameState['music'] }) {
+  const [title, setTitle] = useState(music.title)
+  const [source, setSource] = useState(music.source)
+  const [error, setError] = useState('')
+
+  const updateMusic = (event: React.FormEvent) => {
+    event.preventDefault()
+    socket.emit('updateMusic', { title, source }, (reply: { ok: boolean; error?: string }) => {
+      setError(reply.ok ? '' : reply.error || 'Could not update music.')
+    })
+  }
+
+  return (
+    <section className="music-panel host-music">
+      <h2>
+        <Music size={18} />
+        YouTube Music
+      </h2>
+      <YouTubeFrame music={music} />
+      <form className="music-form" onSubmit={updateMusic}>
+        <label htmlFor="musicTitle">Track name</label>
+        <input id="musicTitle" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={60} />
+        <label htmlFor="musicSource">YouTube link</label>
+        <input
+          id="musicSource"
+          value={source}
+          onChange={(event) => setSource(event.target.value)}
+          placeholder="Video, playlist, or YouTube ID"
+        />
+        <button type="submit">
+          <Music size={16} />
+          Change Music
+        </button>
+      </form>
+      {error && <p className="music-error">{error}</p>}
+    </section>
+  )
+}
+
+function PlayerMusicPanel({ music }: { music: GameState['music'] }) {
+  const [listeningTo, setListeningTo] = useState(0)
+  const listening = listeningTo === music.updatedAt
+
+  return (
+    <section className="music-panel player-music">
+      <div className="music-heading">
+        <h2>
+          <Music size={18} />
+          Room Music
+        </h2>
+        <span>{music.title}</span>
+      </div>
+      {listening ? (
+        <YouTubeFrame music={music} />
+      ) : (
+        <button type="button" onClick={() => setListeningTo(music.updatedAt)}>
+          <Music size={16} />
+          Listen
+        </button>
+      )}
+    </section>
   )
 }
 

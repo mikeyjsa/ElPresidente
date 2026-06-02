@@ -16,6 +16,11 @@ const SCORE_FILE = path.join(process.cwd(), 'data', 'scores.json')
 const RECENT_WINNER_LIMIT = 12
 const CHAT_LIMIT = 40
 const ROOM_CODE_LENGTH = 5
+const DEFAULT_MUSIC = {
+  title: 'Reggaeton Espanol',
+  embedUrl: 'https://www.youtube.com/embed/kJQP7kiw5Fk',
+  source: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk',
+}
 const PLAYER_ICONS = ['crown', 'sparkles', 'flame', 'heart', 'shield', 'club', 'star', 'sun', 'bolt', 'diamond', 'moon', 'gem']
 const PLAYER_COLORS = ['gold', 'green', 'red', 'blue', 'purple', 'teal', 'rose', 'slate']
 const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -113,6 +118,10 @@ function createRoomState(code) {
     winners: score.winners || {},
     recentWinners: score.recentWinners || [],
     skipNotice: null,
+    music: {
+      ...DEFAULT_MUSIC,
+      updatedAt: Date.now(),
+    },
     chat: [],
     log: [`Room ${code} is ready. Scan or enter the room code to join.`],
     computerTurnTimer: null,
@@ -255,6 +264,7 @@ function tableState() {
     recentWinners: state.recentWinners,
     scoreSummary: scoreSummary(),
     skipNotice: state.skipNotice,
+    music: state.music,
     chat: state.chat.slice(-CHAT_LIMIT),
     log: state.log.slice(-8).reverse(),
     joinUrl: `${publicBaseUrl()}/join?room=${state.code}`,
@@ -284,6 +294,47 @@ function playerIdentity(rawIdentity = {}) {
   return {
     icon: PLAYER_ICONS.includes(identity.icon) ? identity.icon : 'star',
     color: PLAYER_COLORS.includes(identity.color) ? identity.color : 'gold',
+  }
+}
+
+function youtubeEmbedFromInput(rawInput) {
+  const source = String(rawInput || '').trim()
+  if (!source) return null
+  const directId = source.match(/^[a-zA-Z0-9_-]{11}$/)?.[0]
+  if (directId) {
+    return {
+      embedUrl: `https://www.youtube.com/embed/${directId}`,
+      source: `https://www.youtube.com/watch?v=${directId}`,
+    }
+  }
+
+  try {
+    const url = new URL(source)
+    if (!/(^|\.)youtu\.be$|(^|\.)youtube\.com$|(^|\.)youtube-nocookie\.com$/.test(url.hostname)) return null
+    const playlistId = url.searchParams.get('list')
+    if (playlistId && /^[a-zA-Z0-9_-]+$/.test(playlistId)) {
+      return {
+        embedUrl: `https://www.youtube.com/embed/videoseries?list=${playlistId}`,
+        source,
+      }
+    }
+    let videoId = ''
+    if (url.hostname.includes('youtu.be')) {
+      videoId = url.pathname.split('/').filter(Boolean)[0] || ''
+    } else if (url.pathname.startsWith('/shorts/')) {
+      videoId = url.pathname.split('/').filter(Boolean)[1] || ''
+    } else if (url.pathname.startsWith('/embed/')) {
+      videoId = url.pathname.split('/').filter(Boolean)[1] || ''
+    } else {
+      videoId = url.searchParams.get('v') || ''
+    }
+    if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return null
+    return {
+      embedUrl: `https://www.youtube.com/embed/${videoId}`,
+      source,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -711,6 +762,25 @@ io.on('connection', (socket) => {
       sentAt: new Date().toISOString(),
     })
     state.chat = state.chat.slice(-CHAT_LIMIT)
+    reply?.({ ok: true })
+    emitAll()
+  })
+
+  socket.on('updateMusic', (payload, reply) => {
+    setRoomFromSocket(socket)
+    const parsed = youtubeEmbedFromInput(typeof payload === 'object' && payload ? payload.source : payload)
+    if (!parsed) {
+      reply?.({ ok: false, error: 'Paste a valid YouTube video or playlist link.' })
+      return
+    }
+    const title = String(typeof payload === 'object' && payload ? payload.title || '' : '').trim().slice(0, 60)
+    state.music = {
+      title: title || 'YouTube Music',
+      embedUrl: parsed.embedUrl,
+      source: parsed.source,
+      updatedAt: Date.now(),
+    }
+    state.log.push(`Host changed the room music to ${state.music.title}.`)
     reply?.({ ok: true })
     emitAll()
   })
