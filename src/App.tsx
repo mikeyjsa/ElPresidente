@@ -37,7 +37,23 @@ import {
 import './App.css'
 import type { Card, ChatMessage, GameState, Player, PlayerColor, PlayerIcon, PlayerRole, RecentWinner, ScoreSummary } from './gameTypes'
 
-const socketUrl = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin
+const productionServerUrl = 'https://elpresidente-production.up.railway.app'
+const configuredSocketUrl = import.meta.env.VITE_SOCKET_URL
+const isNativeAndroidShell = window.location.protocol === 'capacitor:'
+const forceAndroidTv = import.meta.env.VITE_ANDROID_TV === 'true'
+const isLikelyAndroidTv =
+  isNativeAndroidShell &&
+  (forceAndroidTv ||
+    /android tv|aft|bravia|chromecast|crkey|shield android tv|smart-tv|smarttv|television|tv box/i.test(navigator.userAgent) ||
+    (window.innerWidth >= 960 && window.innerHeight >= 540 && navigator.maxTouchPoints === 0))
+if (isLikelyAndroidTv) document.documentElement.classList.add('android-tv')
+const socketUrl = configuredSocketUrl
+  ? configuredSocketUrl
+  : import.meta.env.DEV
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : isNativeAndroidShell
+      ? productionServerUrl
+      : window.location.origin
 const socket: Socket = io(socketUrl)
 const minimumPlayers = 3
 const minimumHumansWithComputer = 2
@@ -116,7 +132,7 @@ function isPileCloser(card: Card) {
 
 function App() {
   const cardAssetsReady = useCardAssetsReady()
-  const isPhone = window.location.pathname.startsWith('/join')
+  const isPhone = (isNativeAndroidShell && !isLikelyAndroidTv) || window.location.pathname.startsWith('/join')
   if (!cardAssetsReady) return <CardPreloadScreen />
   return isPhone ? <PlayerScreen /> : <HostScreen />
 }
@@ -475,22 +491,41 @@ function PlayerScreen() {
     if (!state.pile.length) return new Set(hand.map((card) => card.id))
     return new Set(hand.filter((card) => card.strength >= state.pile[0].strength).map((card) => card.id))
   }, [hand, state.pile])
+  const playableRankIds = useMemo(() => {
+    if (!state.pile.length) return legalCardIds
+    const ids = new Set<string>()
+    const requiredCount = state.pile.length
+    const legalByRank = new Map<number, Card[]>()
+    hand.forEach((card) => {
+      if (!legalCardIds.has(card.id)) return
+      if (isPileCloser(card)) {
+        ids.add(card.id)
+        return
+      }
+      legalByRank.set(card.rank, [...(legalByRank.get(card.rank) || []), card])
+    })
+    legalByRank.forEach((cards) => {
+      if (cards.length >= requiredCount) cards.forEach((card) => ids.add(card.id))
+    })
+    return ids
+  }, [hand, legalCardIds, state.pile])
   const selectedCards = useMemo(() => selected.map((id) => hand.find((card) => card.id === id)).filter((card): card is Card => Boolean(card)), [hand, selected])
   const selectedClosesPile = selectedCards.some(isPileCloser)
   const selectableCardIds = useMemo(() => {
-    if (!selectedCards.length) return legalCardIds
+    if (!selectedCards.length) return playableRankIds
+    if (selectedClosesPile) return new Set(selected)
     const selectedRank = selectedCards[0].rank
     return new Set(
       hand
         .filter((card) => {
           if (selected.includes(card.id)) return true
-          if (!legalCardIds.has(card.id) || card.rank !== selectedRank) return false
-          if (!requiredPlayCount || selectedClosesPile) return true
+          if (!playableRankIds.has(card.id) || card.rank !== selectedRank) return false
+          if (!requiredPlayCount) return true
           return selected.length < requiredPlayCount
         })
         .map((card) => card.id),
     )
-  }, [hand, legalCardIds, requiredPlayCount, selected, selectedCards, selectedClosesPile])
+  }, [hand, playableRankIds, requiredPlayCount, selected, selectedCards, selectedClosesPile])
   const canPlaySelected = Boolean(
     selected.length && (!requiredPlayCount || selectedClosesPile || selected.length === requiredPlayCount),
   )

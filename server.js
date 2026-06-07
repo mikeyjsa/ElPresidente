@@ -163,6 +163,17 @@ function saveScores() {
   )
 }
 
+function saveRoomScore(room = state) {
+  if (!room?.code) return
+  fs.mkdirSync(path.dirname(SCORE_FILE), { recursive: true })
+  savedScores.rooms[room.code] = {
+    round: room.round,
+    winners: room.winners,
+    recentWinners: room.recentWinners,
+  }
+  fs.writeFileSync(SCORE_FILE, JSON.stringify(savedScores, null, 2))
+}
+
 function lanAddress() {
   for (const iface of Object.values(os.networkInterfaces())) {
     for (const details of iface || []) {
@@ -701,8 +712,8 @@ function endRound(reason = '') {
       },
       ...state.recentWinners,
     ].slice(0, RECENT_WINNER_LIMIT)
-    saveScores()
   }
+  saveRoomScore()
   state.phase = 'finished'
   state.currentTurnId = null
   state.turnStartedAt = null
@@ -1049,6 +1060,7 @@ io.on('connection', (socket) => {
     state.readyNextRoundIds = state.readyNextRoundIds.filter((playerId) => readyPlayers.some((readyPlayer) => readyPlayer.id === playerId))
     state.log.push(`${player.name} is ready for the next round (${state.readyNextRoundIds.length}/${readyPlayers.length}).`)
     if (readyPlayers.length >= MIN_HUMANS_WITH_COMPUTER && state.readyNextRoundIds.length >= readyPlayers.length) {
+      saveRoomScore()
       dealRound()
     }
     reply?.({ ok: true })

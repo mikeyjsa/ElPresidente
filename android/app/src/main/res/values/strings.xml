@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">El Presidente</string>
+    <string name="title_activity_main">El Presidente</string>
+    <string name="package_name">com.mikeyjsa.elpresidente</string>
+    <string name="custom_url_scheme">com.mikeyjsa.elpresidente</string>
+</resources>

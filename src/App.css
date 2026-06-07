@@ -2331,6 +2331,44 @@ p {
   backdrop-filter: blur(10px);
 }
 
+html.android-tv .host-shell {
+  grid-template-columns: 260px minmax(620px, 1fr) 280px;
+  gap: 18px;
+  min-height: 100vh;
+  padding: max(28px, 3vh) max(34px, 3vw);
+}
+
+html.android-tv .table-felt {
+  min-height: min(620px, calc(100vh - 110px));
+}
+
+html.android-tv .brand-lockup h1 {
+  font-size: 34px;
+}
+
+html.android-tv .qr-panel img {
+  width: 156px;
+  height: 156px;
+}
+
+html.android-tv .host-actions button,
+html.android-tv .rules-modal button,
+html.android-tv .music-form button {
+  min-height: 48px;
+}
+
+html.android-tv button:focus-visible {
+  outline: 3px solid #ffe988;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgba(255, 233, 136, 0.2), 0 16px 34px rgba(0, 0, 0, 0.35);
+}
+
+html.android-tv .event-log p,
+html.android-tv .score-row,
+html.android-tv .chat-message {
+  font-size: 14px;
+}
+
 @media (max-width: 1100px) {
   .host-shell {
     grid-template-columns: 1fr;
@@ -2488,6 +2526,146 @@ p {
     min-height: 42px;
     font-size: 12px;
   }
+}
+
+html.android-tv .host-shell {
+  grid-template-columns: minmax(160px, 0.72fr) minmax(360px, 1.7fr) minmax(170px, 0.78fr);
+  gap: clamp(8px, 1.2vw, 18px);
+  height: 100vh;
+  min-height: 0;
+  padding: clamp(10px, 2.2vh, 28px) clamp(12px, 2vw, 34px);
+  overflow: hidden;
+}
+
+html.android-tv .join-rail,
+html.android-tv .score-rail {
+  align-self: stretch;
+  display: block;
+  min-width: 0;
+  max-height: 100%;
+  overflow: hidden;
+  border: 0;
+}
+
+html.android-tv .table-stage {
+  order: 0;
+  min-width: 0;
+  overflow: visible;
+}
+
+html.android-tv .brand-lockup {
+  margin-bottom: clamp(4px, 1vh, 8px);
+}
+
+html.android-tv .brand-lockup h1 {
+  font-size: clamp(22px, 2.4vw, 34px);
+}
+
+html.android-tv .brand-lockup p,
+html.android-tv .start-requirement,
+html.android-tv .qr-panel span,
+html.android-tv .qr-panel p {
+  font-size: clamp(10px, 1.15vw, 13px);
+}
+
+html.android-tv .qr-panel img {
+  width: clamp(88px, 10.5vw, 138px);
+  height: clamp(88px, 10.5vw, 138px);
+  margin: 2px 0 4px;
+  border-width: 5px;
+}
+
+html.android-tv .qr-panel,
+html.android-tv .scoreboard,
+html.android-tv .event-log,
+html.android-tv .music-panel,
+html.android-tv .chat-panel {
+  padding: clamp(7px, 1.1vh, 10px);
+}
+
+html.android-tv .qr-panel h2,
+html.android-tv .scoreboard h2,
+html.android-tv .event-log h2,
+html.android-tv .music-panel h2,
+html.android-tv .chat-panel h2 {
+  font-size: clamp(14px, 1.5vw, 18px);
+}
+
+html.android-tv .host-actions {
+  gap: 6px;
+}
+
+html.android-tv .host-actions button {
+  min-height: clamp(34px, 5vh, 48px);
+  font-size: clamp(11px, 1.1vw, 13px);
+}
+
+html.android-tv .table-felt {
+  min-height: min(620px, calc(100vh - 86px));
+  border-width: clamp(10px, 1.5vw, 18px);
+}
+
+html.android-tv .center-table {
+  grid-template-columns: minmax(110px, 0.8fr) minmax(180px, 1.25fr) minmax(86px, 0.7fr);
+  gap: clamp(8px, 1vw, 14px);
+  padding: 0 clamp(24px, 4vw, 54px);
+}
+
+html.android-tv .next-player,
+html.android-tv .timer-dial {
+  height: clamp(96px, 18vh, 124px);
+}
+
+html.android-tv .player-seat {
+  min-width: clamp(112px, 12vw, 138px);
+  padding: 7px 10px 7px 34px;
+}
+
+html.android-tv .scoreboard,
+html.android-tv .event-log,
+html.android-tv .music-panel,
+html.android-tv .chat-panel {
+  padding: clamp(7px, 1.1vh, 10px);
+}
+
+html.android-tv .host-music {
+  margin-top: clamp(5px, 1vh, 8px);
+}
+
+html.android-tv .host-music .youtube-frame {
+  display: none;
+}
+
+html.android-tv .music-heading {
+  gap: 6px;
+}
+
+html.android-tv .music-form {
+  gap: 4px;
+}
+
+html.android-tv .music-form input {
+  min-height: clamp(28px, 4.8vh, 34px);
+  font-size: clamp(11px, 1.1vw, 13px);
+}
+
+html.android-tv .event-log {
+  max-height: clamp(92px, 22vh, 160px);
+  margin-top: clamp(5px, 1vh, 8px);
+}
+
+html.android-tv .score-rail .scoreboard {
+  max-height: clamp(190px, 48vh, 300px);
+}
+
+html.android-tv .score-rail .chat-panel {
+  display: none;
+}
+
+html.android-tv .event-log p,
+html.android-tv .score-row,
+html.android-tv .chat-message {
+  font-size: clamp(11px, 1.08vw, 14px);
 }
 
 @media (prefers-reduced-motion: reduce) {

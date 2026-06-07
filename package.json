@@ -9,10 +9,15 @@
     "server": "node server.js",
     "start": "node server.js",
     "build": "tsc -b && vite build",
+    "android:sync": "npm run build && cap sync android",
+    "android:sync:tv": "VITE_ANDROID_TV=true npm run build && cap sync android",
+    "android:open": "cap open android",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
     "lucide-react": "^1.17.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
@@ -21,6 +26,7 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.3",
     "@types/qrcode": "^1.5.6",

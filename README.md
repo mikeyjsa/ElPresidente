@@ -66,11 +66,57 @@ The dev command starts:
 ```bash
 npm run dev
 npm run build
+npm run android:sync
+npm run android:open
 npm run lint
 npm start
 npm run server
 npm run client
 ```
+
+## Android App
+
+The Android app is a Capacitor wrapper around the same Vite/React game UI, so gameplay rules and layouts stay in one codebase.
+
+By default, native Android builds connect Socket.IO to:
+
+```text
+https://elpresidente-production.up.railway.app
+```
+
+To build/sync the Android project:
+
+```bash
+npm run android:sync
+npm run android:open
+```
+
+For an Android TV host/table build, force TV mode before syncing:
+
+```bash
+npm run android:sync:tv
+```
+
+For LAN testing against a local host/server, build with a socket URL that Android devices can reach:
+
+```bash
+VITE_SOCKET_URL=http://192.168.x.x:3003 npm run android:sync
+```
+
+For Android TV LAN testing:
+
+```bash
+VITE_SOCKET_URL=http://192.168.x.x:3003 npm run android:sync:tv
+```
+
+Android notes:
+
+- The native project is under `android/`.
+- Phone builds open the player join screen by default.
+- Android TV builds open the host/table screen by default.
+- The manifest includes Android TV/Leanback launcher support and does not require a touchscreen.
+- Cleartext traffic is enabled so LAN test servers can use `http://`.
+- Android Studio or a Java runtime is required for Gradle sync/builds.
 
 ## Saved Scores
 
